@@ -1,0 +1,36 @@
+{
+  "name": "seepal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local macOS console for understanding AI coding sessions.",
+  "main": "./out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "build": "electron-vite build",
+    "package:mac": "npm run build && electron-builder --mac dir"
+  },
+  "dependencies": {
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.6.4",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.1.0",
+    "@types/react": "19.1.9",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "43.2.0",
+    "electron-builder": "26.0.12",
+    "electron-vite": "4.0.0",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.2",
+    "vite": "7.0.6",
+    "vitest": "3.2.4"
+  }
+}

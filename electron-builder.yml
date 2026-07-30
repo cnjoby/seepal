@@ -1,0 +1,12 @@
+appId: com.seepal.desktop
+productName: SeePal
+directories:
+  output: release
+files:
+  - out/**/*
+mac:
+  target:
+    - dir
+  category: public.app-category.developer-tools
+  identity: null
+asar: true
