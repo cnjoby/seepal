@@ -39,6 +39,10 @@ local build in Privacy & Security.
 - Codex integration uses only `initialize`, state-database-only `thread/list`
   and `thread/read` over the local App Server stdio protocol. It never sends
   prompts, resumes sessions or invokes JSONL scan-and-repair behavior.
+- When App Server reports a historical Thread as `notLoaded`, SeePal reads only
+  bounded activity flags and timestamps from the local Codex `logs_2.sqlite`
+  database. The database is opened read-only; log bodies, prompts and command
+  content are neither returned to the renderer nor stored by SeePal.
 - Renderer sandboxing, context isolation and a typed preload bridge keep file,
   process and database access in the main process.
 - Deleting a project removes SeePal's database copy. It does not delete source

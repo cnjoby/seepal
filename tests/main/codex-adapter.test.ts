@@ -4,6 +4,7 @@ import {
   CodexAdapter,
   type CodexRpcTransport
 } from '../../src/main/codex-adapter.js'
+import type { CodexActivitySource } from '../../src/main/codex-activity-source.js'
 import type { ProjectScope } from '../../src/shared/domain.js'
 
 class FakeTransport implements CodexRpcTransport {
@@ -50,6 +51,10 @@ function thread(id: string, cwd: string) {
   }
 }
 
+const noLocalActivity: CodexActivitySource = {
+  observe: () => new Map()
+}
+
 describe('CodexAdapter', () => {
   it('passes exact project/worktree cwd filters and rejects unrelated returned threads', async () => {
     const transport = new FakeTransport({
@@ -59,7 +64,10 @@ describe('CodexAdapter', () => {
         nextCursor: null
       }
     })
-    const adapter = new CodexAdapter(transport, { resolvePath: async (path) => path })
+    const adapter = new CodexAdapter(transport, {
+      resolvePath: async (path) => path,
+      activitySource: noLocalActivity
+    })
 
     const result = await adapter.discover('project-1', scope)
 
@@ -77,7 +85,10 @@ describe('CodexAdapter', () => {
       initialize: { userAgent: 'codex/0.139.0' },
       'thread/list': { data: null, nextCursor: null }
     })
-    const adapter = new CodexAdapter(transport, { resolvePath: async (path) => path })
+    const adapter = new CodexAdapter(transport, {
+      resolvePath: async (path) => path,
+      activitySource: noLocalActivity
+    })
 
     const result = await adapter.discover('project-1', scope)
 
@@ -99,7 +110,10 @@ describe('CodexAdapter', () => {
         return { thread: { ...thread('ok', '/tmp/project'), turns: [] } }
       }
     })
-    const adapter = new CodexAdapter(transport, { resolvePath: async (path) => path })
+    const adapter = new CodexAdapter(transport, {
+      resolvePath: async (path) => path,
+      activitySource: noLocalActivity
+    })
 
     const result = await adapter.sync('project-1', scope, 'full-local')
 
@@ -110,5 +124,50 @@ describe('CodexAdapter', () => {
     expect(result.failures).toEqual([
       expect.objectContaining({ stage: 'read', providerSessionId: 'partial' })
     ])
+  })
+
+  it('uses local activity evidence when App Server reports notLoaded', async () => {
+    const transport = new FakeTransport({
+      initialize: { userAgent: 'codex/0.139.0' },
+      'thread/list': {
+        data: [
+          {
+            ...thread('active', '/tmp/project'),
+            status: { type: 'notLoaded' }
+          }
+        ],
+        nextCursor: null
+      }
+    })
+    const activitySource: CodexActivitySource = {
+      observe: () =>
+        new Map([
+          [
+            'active',
+            {
+              status: 'running',
+              observedAt: '2026-07-30T13:00:00.000Z',
+              confidence: 'confirmed',
+              summary: 'Codex 本机活动日志显示最新 Turn 仍在执行。'
+            }
+          ]
+        ])
+    }
+    const adapter = new CodexAdapter(transport, {
+      resolvePath: async (path) => path,
+      activitySource
+    })
+
+    const result = await adapter.sync('project-1', scope, 'minimal')
+
+    expect(result.sessions[0]).toMatchObject({
+      activityStatus: 'running',
+      lastActivityAt: '2026-07-30T13:00:00.000Z'
+    })
+    expect(result.evidence[0]).toMatchObject({
+      status: 'running',
+      source: 'codex-local-activity-log',
+      confidence: 'confirmed'
+    })
   })
 })

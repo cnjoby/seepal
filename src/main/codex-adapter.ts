@@ -1,6 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 
+import {
+  CodexLogActivitySource,
+  type CodexActivitySource
+} from './codex-activity-source.js'
 import type {
   ActivityStatus,
   CodexDiscovery,
@@ -217,6 +221,7 @@ interface AdapterOptions {
   resolvePath?: (path: string) => Promise<string>
   now?: () => Date
   pageSize?: number
+  activitySource?: CodexActivitySource
 }
 
 interface TypeSuggestion {
@@ -296,6 +301,11 @@ function isoFromUnixSeconds(value: number): string {
   return new Date(value * 1_000).toISOString()
 }
 
+function latestIso(left: string, right?: string): string {
+  if (!right) return left
+  return Date.parse(right) > Date.parse(left) ? right : left
+}
+
 function isThreadListResponse(value: unknown): value is ThreadListResponse {
   if (!value || typeof value !== 'object') return false
   const response = value as Partial<ThreadListResponse>
@@ -345,6 +355,7 @@ export class CodexAdapter {
   private readonly resolvePath: (path: string) => Promise<string>
   private readonly now: () => Date
   private readonly pageSize: number
+  private readonly activitySource: CodexActivitySource
 
   constructor(
     private readonly transport: CodexRpcTransport = new StdioCodexTransport(),
@@ -353,6 +364,8 @@ export class CodexAdapter {
     this.resolvePath = options.resolvePath ?? realpath
     this.now = options.now ?? (() => new Date())
     this.pageSize = options.pageSize ?? 100
+    this.activitySource =
+      options.activitySource ?? new CodexLogActivitySource(undefined, this.now)
   }
 
   private async initialize(): Promise<CodexDiscovery['compatibility']> {
@@ -539,6 +552,11 @@ export class CodexAdapter {
 
     const deadline = Date.now() + 8 * 60_000
     const listedThreads = await this.listMatchedThreads(scope, failures, deadline)
+    const localActivity = this.activitySource.observe(
+      listedThreads
+        .filter((thread) => activityStatus(thread.status) === 'unknown')
+        .map((thread) => thread.id)
+    )
     const collectedAt = this.now().toISOString()
     const sessions: SessionRecord[] = []
     const evidence: Evidence[] = []
@@ -580,7 +598,12 @@ export class CodexAdapter {
       const localText = strategy === 'full-local' && !isPartial ? extractLocalText(thread) : ''
       const suggestion = suggestType(`${thread.name ?? ''}\n${thread.preview}\n${localText}`)
       const id = `${projectId}:codex:${thread.id}`
-      const status = activityStatus(thread.status)
+      const providerStatus = activityStatus(thread.status)
+      const localObservation =
+        providerStatus === 'unknown' ? localActivity.get(thread.id) : undefined
+      const status = localObservation?.status ?? providerStatus
+      const providerUpdatedAt = isoFromUnixSeconds(thread.updatedAt)
+      const activityObservedAt = localObservation?.observedAt ?? providerUpdatedAt
       const session: SessionRecord = {
         id,
         projectId,
@@ -589,8 +612,8 @@ export class CodexAdapter {
         title: thread.name?.trim() || thread.preview.trim() || `Codex Session ${thread.id}`,
         cwd: thread.cwd,
         createdAt: isoFromUnixSeconds(thread.createdAt),
-        updatedAt: isoFromUnixSeconds(thread.updatedAt),
-        lastActivityAt: isoFromUnixSeconds(thread.updatedAt),
+        updatedAt: providerUpdatedAt,
+        lastActivityAt: latestIso(providerUpdatedAt, localObservation?.observedAt),
         activityStatus: status,
         suggestedType: suggestion.type,
         suggestedTypeConfidence: suggestion.confidence,
@@ -607,24 +630,26 @@ export class CodexAdapter {
       }
       sessions.push(session)
       evidence.push({
-        id: `${id}:activity:${thread.updatedAt}:${status}`,
+        id: `${id}:activity:${activityObservedAt}:${status}`,
         projectId,
         sessionId: id,
         axis: 'activity',
         status,
         summary:
-          status === 'running'
+          localObservation?.summary ??
+          (status === 'running'
             ? 'Codex 当前仍在执行这个 Session。'
             : status === 'waiting-for-user'
               ? 'Codex 正在等待用户输入或批准。'
               : status === 'ended'
                 ? 'Codex 当前没有正在执行的 Turn；这不代表需求已经完成。'
-                : 'Codex 当前状态不足以判断 Session 是否仍在执行。',
-        source: 'codex-thread-status',
+                : 'Codex 当前状态不足以判断 Session 是否仍在执行。'),
+        source: localObservation ? 'codex-local-activity-log' : 'codex-thread-status',
         sourceRef: thread.id,
-        occurredAt: isoFromUnixSeconds(thread.updatedAt),
+        occurredAt: activityObservedAt,
         collectedAt,
-        confidence: status === 'unknown' ? 'unknown' : 'confirmed'
+        confidence:
+          localObservation?.confidence ?? (status === 'unknown' ? 'unknown' : 'confirmed')
       })
 
       if (strategy === 'full-local' && !isPartial) {
