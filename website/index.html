@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="styles.css" />
     <title>SeePal — Seepal.ai</title>
   </head>
-  <body>
+  <body data-lang="en">
     <div class="ambient-surface">
       <div class="grain-layer" aria-hidden="true"></div>
       <div class="glow glow-one" aria-hidden="true"></div>
@@ -149,19 +149,40 @@
         <div class="container">
           <header class="section-head">
             <p class="eyebrow">FAQ</p>
-            <h2>Questions</h2>
+            <h2>FAQ · 常见问题</h2>
           </header>
+          <div class="lang-switch" role="tablist" aria-label="FAQ language">
+            <button data-lang="en" class="pill-button is-active" role="tab">English</button>
+            <button data-lang="zh" class="pill-button" role="tab">中文</button>
+          </div>
           <details>
-            <summary>Does SeePal work without internet?</summary>
-            <p>After setup, the dashboard runs locally and keeps core features online-free.</p>
+            <summary>
+              <span class="faq-en">Does SeePal work without internet?</span>
+              <span class="faq-zh">SeePal 可以离线使用吗？</span>
+            </summary>
+            <p class="faq-en">After setup, the dashboard runs locally and keeps core features online-free.</p>
+            <p class="faq-zh">完成设置后，核心功能本地运行，不会依赖云端服务。</p>
           </details>
           <details>
-            <summary>What coding tools can I use?</summary>
-            <p>SeePal focuses on Codex-style thread history and local Git context in this phase.</p>
+            <summary>
+              <span class="faq-en">What coding tools can I use?</span>
+              <span class="faq-zh">我可以搭配哪些编程工具？</span>
+            </summary>
+            <p class="faq-en">SeePal focuses on Codex-style thread history and local Git context in this phase.</p>
+            <p class="faq-zh">当前版本聚焦 Codex 风格会话记录与本地 Git 上下文。</p>
           </details>
           <details>
-            <summary>Is my source code uploaded?</summary>
-            <p>Source code is not uploaded by default. AI interpretation is opt-in and local prompts are clearly controlled.</p>
+            <summary>
+              <span class="faq-en">Is my source code uploaded?</span>
+              <span class="faq-zh">源码会被上传吗？</span>
+            </summary>
+            <p class="faq-en">
+              Source code is not uploaded by default. AI interpretation is opt-in and local prompts
+              are clearly controlled.
+            </p>
+            <p class="faq-zh">
+              默认不会上传源码。AI 解读是可选流程，且本地读取边界会明确展示。
+            </p>
           </details>
         </div>
       </section>
@@ -202,6 +223,16 @@
         { rootMargin: '-40% 0px -50% 0px' },
       )
       document.querySelectorAll('main section[id]').forEach((sec) => observer.observe(sec))
+
+      const body = document.body
+      const buttons = document.querySelectorAll('.lang-switch button')
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const lang = button.dataset.lang
+          body.setAttribute('data-lang', lang)
+          buttons.forEach((item) => item.classList.toggle('is-active', item === button))
+        })
+      })
     </script>
   </body>
 </html>

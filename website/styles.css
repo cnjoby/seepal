@@ -340,6 +340,13 @@ h1 {
 
 .faq {
   max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+.faq .section-head {
+  text-align: center;
 }
 
 .faq details {
@@ -347,7 +354,9 @@ h1 {
   background: var(--card);
   border-radius: 12px;
   padding: 14px 16px;
-  margin: 0 0 12px;
+  margin: 0 auto 12px;
+  max-width: 860px;
+  text-align: center;
 }
 
 .faq details summary {
@@ -359,6 +368,43 @@ h1 {
   margin: 10px 0 2px;
   color: var(--muted);
   line-height: 1.65;
+}
+
+.lang-switch {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 16px 0 24px;
+}
+
+.pill-button {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill-button.is-active {
+  color: #081224;
+  background: linear-gradient(90deg, var(--brand), #9dccff);
+  border-color: transparent;
+}
+
+.faq-en,
+.faq-zh {
+  display: none;
+}
+
+[data-lang='en'] .faq-en {
+  display: block;
+}
+
+[data-lang='zh'] .faq-zh {
+  display: block;
 }
 
 .cta {
