@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from './api'
 import {
+  AiConfig,
+  AiProtocol,
+  DEFAULT_AI_BASE_URLS,
+  DEFAULT_AI_MODEL,
   GROUP_LABELS,
   GROUP_ORDER,
   SESSION_TYPE_LABELS,
@@ -21,6 +26,7 @@ import {
   GitBranchIcon,
   PlusIcon,
   RefreshIcon,
+  SettingsIcon,
   ShieldIcon,
   TrashIcon,
 } from './icons'
@@ -71,6 +77,7 @@ export function App() {
   const [error, setError] = useState<string>()
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [groupMode, setGroupMode] = useState<GroupMode>('status')
   const [statusFilter, setStatusFilter] = useState<SessionGroup | 'all'>('all')
   const [typeFilter, setTypeFilter] = useState<SessionType | 'all'>('all')
@@ -141,13 +148,16 @@ export function App() {
         setSelectedSessionId(undefined)
         setOnboardingOpen(false)
         setDeleteOpen(false)
+        setAiSettingsOpen(false)
       }
       if (event.metaKey && event.key.toLowerCase() === 'r') {
         event.preventDefault()
+        if (onboardingOpen || deleteOpen || aiSettingsOpen) return
         void handleSync()
       }
       if (event.metaKey && event.key.toLowerCase() === 'n') {
         event.preventDefault()
+        if (onboardingOpen || deleteOpen || aiSettingsOpen) return
         setOnboardingOpen(true)
       }
     }
@@ -246,6 +256,7 @@ export function App() {
           setSelectedProjectId(id)
         }}
         onAdd={() => setOnboardingOpen(true)}
+        onAiSettings={() => setAiSettingsOpen(true)}
       />
 
       <main className="main-panel">
@@ -318,6 +329,10 @@ export function App() {
           onConfirm={handleProjectDeleted}
         />
       ) : null}
+
+      {aiSettingsOpen ? (
+        <AiSettingsDialog onClose={() => setAiSettingsOpen(false)} />
+      ) : null}
     </div>
   )
 }
@@ -340,11 +355,13 @@ function ProjectRail({
   selectedId,
   onSelect,
   onAdd,
+  onAiSettings,
 }: {
   projects: ProjectSummary[]
   selectedId?: string
   onSelect: (id: string) => void
   onAdd: () => void
+  onAiSettings: () => void
 }) {
   return (
     <aside className="project-rail" aria-label="项目">
@@ -370,6 +387,14 @@ function ProjectRail({
       </div>
       <button className="rail-add" onClick={onAdd} aria-label="添加项目" title="添加项目 ⌘N">
         <PlusIcon />
+      </button>
+      <button
+        className="rail-settings"
+        onClick={onAiSettings}
+        aria-label="AI 设置"
+        title="AI 设置"
+      >
+        <SettingsIcon />
       </button>
     </aside>
   )
@@ -1222,6 +1247,299 @@ function DeleteProjectDialog({
             {busy ? '正在清理…' : '删除 SeePal 副本'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+const DEFAULT_AI_CONFIG: AiConfig = {
+  protocol: 'openai',
+  baseUrl: DEFAULT_AI_BASE_URLS.openai,
+  model: DEFAULT_AI_MODEL,
+  hasApiKey: false,
+}
+
+function AiSettingsDialog({ onClose }: { onClose: () => void }) {
+  const [config, setConfig] = useState<AiConfig>(DEFAULT_AI_CONFIG)
+  const [apiKey, setApiKey] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<{
+    tone: 'success' | 'error'
+    message: string
+  }>()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    let active = true
+    api
+      .getAiConfig()
+      .then((stored) => {
+        if (!active) return
+        setConfig(stored)
+        if (stored.loadError) {
+          setFeedback({ tone: 'error', message: stored.loadError })
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!active) return
+        setFeedback({
+          tone: 'error',
+          message:
+            reason instanceof Error ? reason.message : '无法读取 AI 配置。',
+        })
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+      previouslyFocused?.focus()
+    }
+  }, [])
+
+  function trapFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled])',
+      ) ?? [],
+    )
+    if (focusable.length === 0) {
+      event.preventDefault()
+      dialogRef.current?.focus()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first?.focus()
+    }
+  }
+
+  async function save(): Promise<AiConfig | undefined> {
+    setBusy(true)
+    setFeedback(undefined)
+    try {
+      const normalizedApiKey = apiKey.trim()
+      const saved = await api.saveAiConfig({
+        protocol: config.protocol,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        ...(normalizedApiKey ? { apiKey: normalizedApiKey } : {}),
+      })
+      setConfig(saved)
+      setApiKey('')
+      setFeedback({ tone: 'success', message: 'AI 配置已安全保存。' })
+      return saved
+    } catch (reason) {
+      setFeedback({
+        tone: 'error',
+        message: reason instanceof Error ? reason.message : 'AI 配置没有保存。',
+      })
+      return undefined
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function testConnection() {
+    const saved = await save()
+    if (!saved?.hasApiKey) {
+      setFeedback({ tone: 'error', message: '请先输入并保存 API Key。' })
+      return
+    }
+    setBusy(true)
+    setFeedback(undefined)
+    try {
+      const result = await api.testAiConnection()
+      setFeedback({
+        tone: result.ok ? 'success' : 'error',
+        message: result.ok
+          ? `${result.message} 模型：${result.model ?? saved.model} · ${result.latencyMs ?? 0} ms`
+          : result.message,
+      })
+    } catch (reason) {
+      setFeedback({
+        tone: 'error',
+        message:
+          reason instanceof Error ? reason.message : '连接测试没有完成。',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clearApiKey() {
+    if (!config.hasApiKey) {
+      setApiKey('')
+      setFeedback({ tone: 'success', message: '已清空尚未保存的 API Key。' })
+      return
+    }
+    setBusy(true)
+    setFeedback(undefined)
+    try {
+      const cleared = await api.clearAiApiKey()
+      setConfig((current) => ({
+        ...current,
+        hasApiKey: false,
+        loadError: cleared.loadError,
+      }))
+      setApiKey('')
+      setFeedback({ tone: 'success', message: '已清除保存的 API Key。' })
+    } catch (reason) {
+      setFeedback({
+        tone: 'error',
+        message:
+          reason instanceof Error ? reason.message : 'API Key 没有清除。',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div
+        className="modal ai-settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI 设置"
+        tabIndex={-1}
+        ref={dialogRef}
+        onKeyDown={trapFocus}
+      >
+        <header className="modal-header">
+          <div>
+            <p className="eyebrow">GLOBAL AI CONNECTOR</p>
+            <h2>配置模型接口</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="关闭 AI 设置">
+            <CloseIcon />
+          </button>
+        </header>
+
+        <p className="ai-settings-intro">
+          配置仅保存在这台 Mac。只有点击“测试连接”或后续明确启用 Session
+          解读时，内容才会发送到模型服务。
+        </p>
+
+        <div className="ai-example-box">
+          <span>默认示例</span>
+          <code>OpenAI · https://api.deepseek.com</code>
+          <code>Anthropic · https://api.deepseek.com/anthropic</code>
+          <code>Model · deepseek-v4-flash</code>
+        </div>
+
+        <div className="ai-settings-form" aria-busy={loading}>
+          <label>
+            <span>兼容协议</span>
+            <select
+              value={config.protocol}
+              disabled={loading || busy}
+              onChange={(event) => {
+                const protocol = event.target.value as AiProtocol
+                setConfig((current) => ({
+                  ...current,
+                  protocol,
+                  baseUrl: DEFAULT_AI_BASE_URLS[protocol],
+                }))
+              }}
+            >
+              <option value="openai">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic-compatible</option>
+            </select>
+          </label>
+          <label>
+            <span>Base URL</span>
+            <input
+              value={config.baseUrl}
+              disabled={loading || busy}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...current,
+                  baseUrl: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>Model</span>
+            <input
+              value={config.model}
+              disabled={loading || busy}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...current,
+                  model: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>
+              API Key
+              {config.hasApiKey ? <em>已保存密钥</em> : null}
+            </span>
+            <input
+              type="password"
+              value={apiKey}
+              autoComplete="off"
+              placeholder="sk-your-api-key"
+              disabled={loading || busy}
+              onChange={(event) => setApiKey(event.target.value)}
+            />
+            <small>
+              留空会保留已保存的密钥；明文不会返回到界面。
+            </small>
+          </label>
+        </div>
+
+        {feedback ? (
+          <div
+            className={`ai-feedback ai-feedback-${feedback.tone}`}
+            role={feedback.tone === 'error' ? 'alert' : 'status'}
+          >
+            {feedback.message}
+          </div>
+        ) : null}
+
+        <div className="ai-settings-actions">
+          <button
+            className="quiet-button danger-on-hover"
+            disabled={busy || (!config.hasApiKey && !apiKey)}
+            onClick={() => void clearApiKey()}
+          >
+            清除密钥
+          </button>
+          <div>
+            <button
+              className="secondary-button"
+              disabled={loading || busy}
+              onClick={() => void save()}
+            >
+              保存配置
+            </button>
+            <button
+              className="primary-button"
+              disabled={loading || busy}
+              onClick={() => void testConnection()}
+            >
+              {busy ? '正在处理…' : '测试连接'}
+            </button>
+          </div>
+        </div>
+
+        <footer className="modal-footnote">
+          <ShieldIcon />
+          API Key 通过 macOS 安全存储加密；已保存的明文不会返回 Renderer。
+        </footer>
       </div>
     </div>
   )

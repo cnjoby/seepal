@@ -19,6 +19,10 @@ const { mockApi } = vi.hoisted(() => ({
     syncCodex: vi.fn(),
     updateSessionType: vi.fn(),
     deleteProject: vi.fn(),
+    getAiConfig: vi.fn(),
+    saveAiConfig: vi.fn(),
+    clearAiApiKey: vi.fn(),
+    testAiConnection: vi.fn(),
   },
 }))
 
@@ -150,6 +154,30 @@ function resetApi() {
     }),
   )
   mockApi.deleteProject.mockResolvedValue({ success: true })
+  mockApi.getAiConfig.mockResolvedValue({
+    protocol: 'openai',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    hasApiKey: false,
+  })
+  mockApi.saveAiConfig.mockImplementation(async (input) => ({
+    protocol: input.protocol,
+    baseUrl: input.baseUrl,
+    model: input.model,
+    hasApiKey: Boolean(input.apiKey),
+  }))
+  mockApi.clearAiApiKey.mockResolvedValue({
+    protocol: 'openai',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    hasApiKey: false,
+  })
+  mockApi.testAiConnection.mockResolvedValue({
+    ok: true,
+    message: '连接成功。',
+    model: 'deepseek-v4-flash',
+    latencyMs: 42,
+  })
 }
 
 describe('Epic 1 Project Console', () => {
@@ -268,6 +296,131 @@ describe('Epic 1 Project Console', () => {
     await waitFor(() =>
       expect(mockApi.syncCodex).toHaveBeenCalledWith(project.id, 'full-local'),
     )
+  })
+
+  it('shows global AI examples without connecting or exposing a saved key', async () => {
+    const user = userEvent.setup()
+    mockApi.getAiConfig.mockResolvedValue({
+      protocol: 'anthropic',
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      model: 'deepseek-v4-flash',
+      hasApiKey: true,
+    })
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'AI 设置' }))
+    const dialog = await screen.findByRole('dialog', { name: 'AI 设置' })
+
+    expect(
+      within(dialog).getByText('OpenAI · https://api.deepseek.com'),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        'Anthropic · https://api.deepseek.com/anthropic',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText('已保存密钥')).toBeInTheDocument()
+    expect(
+      within(dialog).getByPlaceholderText('sk-your-api-key'),
+    ).toHaveValue('')
+    expect(mockApi.testAiConnection).not.toHaveBeenCalled()
+  })
+
+  it('saves current AI settings before an explicitly requested connection test', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'AI 设置' }))
+    const dialog = await screen.findByRole('dialog', { name: 'AI 设置' })
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('兼容协议')).toBeEnabled(),
+    )
+
+    await user.selectOptions(
+      within(dialog).getByLabelText('兼容协议'),
+      'anthropic',
+    )
+    expect(within(dialog).getByLabelText('Base URL')).toHaveValue(
+      'https://api.deepseek.com/anthropic',
+    )
+    await user.type(
+      within(dialog).getByPlaceholderText('sk-your-api-key'),
+      'sk-renderer-test-only',
+    )
+    await user.click(
+      within(dialog).getByRole('button', { name: '测试连接' }),
+    )
+
+    await waitFor(() =>
+      expect(mockApi.saveAiConfig).toHaveBeenCalledWith({
+        protocol: 'anthropic',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        model: 'deepseek-v4-flash',
+        apiKey: 'sk-renderer-test-only',
+      }),
+    )
+    expect(mockApi.testAiConnection).toHaveBeenCalledOnce()
+    expect(
+      await within(dialog).findByText(
+        '连接成功。 模型：deepseek-v4-flash · 42 ms',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByPlaceholderText('sk-your-api-key'),
+    ).toHaveValue('')
+  })
+
+  it('clears a saved AI key without changing other settings', async () => {
+    const user = userEvent.setup()
+    const savedConfig = {
+      protocol: 'anthropic' as const,
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      model: 'deepseek-v4-flash',
+      hasApiKey: true,
+    }
+    mockApi.getAiConfig.mockResolvedValue(savedConfig)
+    mockApi.clearAiApiKey.mockResolvedValue({
+      ...savedConfig,
+      hasApiKey: false,
+    })
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'AI 设置' }))
+    const dialog = await screen.findByRole('dialog', { name: 'AI 设置' })
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole('button', { name: '清除密钥' }),
+      ).toBeEnabled(),
+    )
+    await user.click(
+      within(dialog).getByRole('button', { name: '清除密钥' }),
+    )
+
+    await waitFor(() => expect(mockApi.clearAiApiKey).toHaveBeenCalledOnce())
+    expect(within(dialog).getByText('已清除保存的 API Key。')).toBeInTheDocument()
+    expect(within(dialog).queryByText('已保存密钥')).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Base URL')).toHaveValue(
+      savedConfig.baseUrl,
+    )
+  })
+
+  it('clears an unsaved key locally without calling the main process', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'AI 设置' }))
+    const dialog = await screen.findByRole('dialog', { name: 'AI 设置' })
+    const keyInput = within(dialog).getByPlaceholderText('sk-your-api-key')
+    await user.type(keyInput, '  sk-local-draft-only  ')
+    await user.click(
+      within(dialog).getByRole('button', { name: '清除密钥' }),
+    )
+
+    expect(mockApi.clearAiApiKey).not.toHaveBeenCalled()
+    expect(keyInput).toHaveValue('')
+    expect(
+      within(dialog).getByText('已清空尚未保存的 API Key。'),
+    ).toBeInTheDocument()
   })
 })
 

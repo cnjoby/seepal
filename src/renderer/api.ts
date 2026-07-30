@@ -1,5 +1,8 @@
 import type {
   AddProjectInput,
+  AiConfig,
+  AiConfigInput,
+  AiConnectionTestResult,
   ContentPolicy,
   DeleteResult,
   ProjectDashboard,
@@ -28,6 +31,10 @@ const fallbackApi: SeePalApi = {
     _type: SessionType,
   ) => unavailable<SessionView>(),
   deleteProject: () => unavailable<DeleteResult>(),
+  getAiConfig: () => unavailable<AiConfig>(),
+  saveAiConfig: (_input: AiConfigInput) => unavailable<AiConfig>(),
+  clearAiApiKey: () => unavailable<AiConfig>(),
+  testAiConnection: () => unavailable<AiConnectionTestResult>(),
 }
 
 export const api: SeePalApi =

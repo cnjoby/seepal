@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, safeStorage } from 'electron'
+import { AiConfigStore } from './ai-config-store.js'
+import { AiProviderClient } from './ai-provider.js'
 import { CodexAdapter } from './codex-adapter.js'
 import { SeePalDatabase } from './database.js'
 import { GitAdapter } from './git-adapter.js'
@@ -61,9 +63,26 @@ app.whenReady().then(() => {
   const git = new GitAdapter()
   codex = new CodexAdapter()
   const service = new ProjectService(database, git, codex)
+  const aiConfig = new AiConfigStore(
+    join(app.getPath('userData'), 'ai-provider.json'),
+    {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (value) =>
+        safeStorage.encryptString(value).toString('base64'),
+      decrypt: (value) =>
+        safeStorage.decryptString(Buffer.from(value, 'base64')),
+    },
+  )
+  const aiProvider = new AiProviderClient(aiConfig)
   const developmentUrl = process.env.ELECTRON_RENDERER_URL
   const allowedRendererUrl = developmentUrl ?? new URL(`file://${rendererEntry()}`).href
-  registerIpcHandlers({ service, git, allowedRendererUrl })
+  registerIpcHandlers({
+    service,
+    git,
+    aiConfig,
+    aiProvider,
+    allowedRendererUrl,
+  })
   createWindow()
 
   app.on('activate', () => {

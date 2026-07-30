@@ -5,11 +5,15 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { GitAdapter } from './git-adapter.js'
+import { AiConfigStore } from './ai-config-store.js'
+import { AiProviderClient } from './ai-provider.js'
 import { ProjectService } from './project-service.js'
 import {
   IPC_CHANNELS,
   UI_SESSION_TYPES,
   type ContentPolicy,
+  type AiConfigInput,
+  type AiProtocol,
   type ProjectInspectionDto,
   type UiSessionType,
 } from '../shared/ipc.js'
@@ -24,6 +28,8 @@ import {
 export interface IpcDependencies {
   service: ProjectService
   git: GitAdapter
+  aiConfig: AiConfigStore
+  aiProvider: AiProviderClient
   allowedRendererUrl: string
   chooseDirectory?: () => Promise<string | null>
 }
@@ -58,6 +64,19 @@ function requireUiType(value: unknown): UiSessionType {
   return value as UiSessionType
 }
 
+function requireAiProtocol(value: unknown): AiProtocol {
+  if (value === 'openai' || value === 'anthropic') return value
+  throw new TypeError('AI 协议无效。')
+}
+
+function optionalApiKey(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length > 10_000) {
+    throw new TypeError('apiKey is invalid')
+  }
+  return value
+}
+
 async function defaultChooseDirectory(): Promise<string | null> {
   const result = await dialog.showOpenDialog({
     title: '选择本地 Git 项目',
@@ -69,6 +88,8 @@ async function defaultChooseDirectory(): Promise<string | null> {
 export function registerIpcHandlers({
   service,
   git,
+  aiConfig,
+  aiProvider,
   allowedRendererUrl,
   chooseDirectory = defaultChooseDirectory,
 }: IpcDependencies): void {
@@ -176,6 +197,41 @@ export function registerIpcHandlers({
         result.remaining.length > 0
           ? `仍有本地数据未清理：${result.remaining.join('、')}`
           : 'SeePal 本地副本已删除，原项目和 Codex Session 未被修改。',
+    }
+  })
+
+  handle(IPC_CHANNELS.getAiConfig, () => aiConfig.getPublicConfig())
+
+  handle(IPC_CHANNELS.saveAiConfig, (rawInput) => {
+    const input = requireRecord(rawInput)
+    const config: AiConfigInput = {
+      protocol: requireAiProtocol(input.protocol),
+      baseUrl: requireString(input.baseUrl, 'baseUrl'),
+      model: requireString(input.model, 'model'),
+      apiKey: optionalApiKey(input.apiKey),
+    }
+    return aiConfig.save(config)
+  })
+
+  handle(IPC_CHANNELS.clearAiApiKey, () => aiConfig.clearApiKey())
+
+  handle(IPC_CHANNELS.testAiConnection, async () => {
+    try {
+      const result = await aiProvider.testConnection()
+      return {
+        ok: true,
+        message: '连接成功。',
+        model: result.model,
+        latencyMs: result.latencyMs,
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : '连接模型服务失败，请检查配置。',
+      }
     }
   })
 }

@@ -45,6 +45,17 @@ local build in Privacy & Security.
   content are neither returned to the renderer nor stored by SeePal.
 - Renderer sandboxing, context isolation and a typed preload bridge keep file,
   process and database access in the main process.
+- Global AI connector settings are stored in `ai-provider.json` beneath
+  Electron's per-user application-data directory. Base URL, protocol and model
+  are ordinary local settings; the API key is encrypted with Electron
+  `safeStorage`, is never returned to the renderer, and is not stored in
+  SQLite or logs.
+- The connector supports OpenAI-compatible and Anthropic-compatible request
+  shapes. The default examples are DeepSeek endpoints and
+  `deepseek-v4-flash`; `sk-your-api-key` is only a placeholder.
+- Opening or saving AI settings does not contact a provider. A minimal request
+  is sent only when the user clicks **测试连接**. Requests use HTTPS, reject
+  redirects, time out after 15 seconds and cap response bodies at 1 MiB.
 - Deleting a project removes SeePal's database copy. It does not delete source
   files, Git objects, branches, worktrees, Codex sessions or source documents.
 
@@ -68,6 +79,7 @@ Implemented: local projects, Codex authorization and sync, status/type views,
 six-axis evidence details, type corrections, project isolation and local data
 deletion.
 
-Not implemented: Attention ranking, provider focus/deep links, context handoff,
-work-item aggregation, OpenCode, Claude Code, terminal streaming, automatic
-prompts, cloud accounts or Kanban workflows.
+Not implemented: Session interpretation or bulk upload, Attention ranking,
+provider focus/deep links, context handoff, work-item aggregation, OpenCode,
+Claude Code, terminal streaming, automatic prompts, cloud accounts or Kanban
+workflows.

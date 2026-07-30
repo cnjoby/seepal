@@ -1,5 +1,11 @@
 import {
+  DEFAULT_AI_BASE_URLS,
+  DEFAULT_AI_MODEL,
   UI_SESSION_TYPES,
+  type AiConfigDto,
+  type AiConfigInput as AiConfigInputDto,
+  type AiConnectionTestResultDto,
+  type AiProtocol,
   type ContentPolicy,
   type DeleteResultDto,
   type EvidenceAxisDto,
@@ -12,6 +18,7 @@ import {
 } from '../shared/ipc'
 
 export const SESSION_TYPES = UI_SESSION_TYPES
+export { DEFAULT_AI_BASE_URLS, DEFAULT_AI_MODEL }
 export type SessionType = UiSessionType
 
 export const SESSION_TYPE_LABELS: Record<SessionType, string> = {
@@ -53,10 +60,14 @@ export type ProjectSummary = ProjectSummaryDto
 export type ProjectDashboard = ProjectDashboardDto
 export type ProjectInspection = ProjectInspectionDto
 export type DeleteResult = DeleteResultDto
+export type AiConfig = AiConfigDto
+export type AiConfigInput = AiConfigInputDto
+export type AiConnectionTestResult = AiConnectionTestResultDto
 
 export type AddProjectInput = Parameters<SeePalApi['addProject']>[0]
 
 export type {
   ContentPolicy,
+  AiProtocol,
   SeePalApi,
 }

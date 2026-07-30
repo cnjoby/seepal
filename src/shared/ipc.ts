@@ -7,6 +7,10 @@ export const IPC_CHANNELS = {
   syncCodex: 'seepal:sync-codex',
   updateSessionType: 'seepal:update-session-type',
   deleteProject: 'seepal:delete-project',
+  getAiConfig: 'seepal:get-ai-config',
+  saveAiConfig: 'seepal:save-ai-config',
+  clearAiApiKey: 'seepal:clear-ai-api-key',
+  testAiConnection: 'seepal:test-ai-connection',
 } as const
 
 export const UI_SESSION_TYPES = [
@@ -24,6 +28,12 @@ export const UI_SESSION_TYPES = [
 
 export type UiSessionType = (typeof UI_SESSION_TYPES)[number]
 export type ContentPolicy = 'metadata' | 'full-local'
+export type AiProtocol = 'openai' | 'anthropic'
+export const DEFAULT_AI_MODEL = 'deepseek-v4-flash'
+export const DEFAULT_AI_BASE_URLS: Record<AiProtocol, string> = {
+  openai: 'https://api.deepseek.com',
+  anthropic: 'https://api.deepseek.com/anthropic',
+}
 export type SourceStatus =
   | 'not-connected'
   | 'syncing'
@@ -114,6 +124,28 @@ export interface DeleteResultDto {
   message?: string
 }
 
+export interface AiConfigDto {
+  protocol: AiProtocol
+  baseUrl: string
+  model: string
+  hasApiKey: boolean
+  loadError?: string
+}
+
+export interface AiConfigInput {
+  protocol: AiProtocol
+  baseUrl: string
+  model: string
+  apiKey?: string
+}
+
+export interface AiConnectionTestResultDto {
+  ok: boolean
+  message: string
+  model?: string
+  latencyMs?: number
+}
+
 export interface SeePalApi {
   listProjects(): Promise<ProjectSummaryDto[]>
   selectDirectory(): Promise<string | null>
@@ -134,4 +166,8 @@ export interface SeePalApi {
     type: UiSessionType,
   ): Promise<SessionViewDto>
   deleteProject(projectId: string): Promise<DeleteResultDto>
+  getAiConfig(): Promise<AiConfigDto>
+  saveAiConfig(input: AiConfigInput): Promise<AiConfigDto>
+  clearAiApiKey(): Promise<AiConfigDto>
+  testAiConnection(): Promise<AiConnectionTestResultDto>
 }
