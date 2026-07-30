@@ -2,7 +2,7 @@
 title: '修复 macOS AI Key 安全存储不可用'
 type: 'bugfix'
 created: '2026-07-31'
-status: 'in-progress'
+status: 'done'
 baseline_commit: 'd2cca23'
 context:
   - 'docs/implementation-artifacts/spec-configurable-ai-connector.md'
@@ -50,7 +50,7 @@ context:
 - [x] `src/main/index.ts` -- 使用 `isAsyncEncryptionAvailable`、`encryptStringAsync`、`decryptStringAsync`，将底层错误转成安全提示。
 - [x] `src/main/ai-provider.ts`、`src/main/project-ai-scan-service.ts`、`src/main/ipc.ts` -- 传播异步等待，不改变网络协议或 Renderer 契约。
 - [x] `tests/main/ai-config-store.test.ts` 及相关测试 -- 先复现同步不可用/异步可用，再覆盖不可用、旧配置和调用链。
-- [ ] 重新构建并挂载 DMG，验证打包应用可保存 Key；通过后替换待发布 DMG。
+- [x] 重新构建并挂载 DMG，验证打包应用可保存 Key；通过后替换待发布 DMG。
 
 **Acceptance Criteria:**
 - Given macOS 同步安全存储检查不可用但异步钥匙串可初始化，when 用户保存 Key，then 配置成功保存且磁盘文件不含明文。
@@ -67,3 +67,31 @@ context:
 - `npm run build` -- 生产构建通过。
 - `npx electron-builder --mac dmg --arm64` -- 生成替换后的 DMG。
 - `hdiutil verify` -- DMG 校验通过。
+
+**Packaged app validation:**
+- 在已解锁 macOS 登录钥匙串后，用临时测试 Key 完成保存；配置文件权限为 `600`，磁盘文件不含明文。
+- 退出并重新打开打包应用后，界面仍显示密钥已保存，证明异步解密可读取持久化密文。
+- 通过应用界面清除临时测试 Key；配置文件已移除 `encryptedApiKey`，未留下测试凭证。
+
+## Suggested Review Order
+
+**状态并发与钥匙串边界**
+
+- 优先从配置服务切入，先确认竞态与 keychain 不可用分支都已闭环。
+  [`ai-config-store.ts:45`](../../src/main/ai-config-store.ts#L45)
+- 并发保存/清除通过 `mutationVersion` 和预先写入令牌避免“旧请求覆盖新决策”。
+  [`ai-config-store.ts:126`](../../src/main/ai-config-store.ts#L126)
+- `getPublicConfig` 在钥匙串不可用时不再误报已保存，避免 UI 导航误导。
+  [`ai-config-store.ts:169`](../../src/main/ai-config-store.ts#L169)
+
+**扫描流程并发保护**
+
+- 对 prepare/start 增加状态闸门，避免同项目重复构建和发起重复扫描。
+  [`project-ai-scan-service.ts:234`](../../src/main/project-ai-scan-service.ts#L234)
+
+**回归测试**
+
+- 新增并发保存/清除回归，覆盖旧请求被后续调用覆盖、clear 被 resurrect 的典型路径。
+  [`ai-config-store.test.ts:85`](../../tests/main/ai-config-store.test.ts#L85)
+- 新增并发 prepare/start 回归，覆盖同项目并发创建和启动分支。
+  [`project-ai-scan-service.test.ts:230`](../../tests/main/project-ai-scan-service.test.ts#L230)

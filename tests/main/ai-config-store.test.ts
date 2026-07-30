@@ -15,6 +15,7 @@ import {
 } from '../../src/main/ai-config-store.js'
 
 const temporaryDirectories: string[] = []
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function configPath(): string {
   const directory = mkdtempSync(join(tmpdir(), 'seepal-ai-config-'))
@@ -51,6 +52,93 @@ describe('AiConfigStore', () => {
       hasApiKey: false,
     })
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('rejects preserving an existing key when keychain is unavailable', async () => {
+    const path = configPath()
+    const store = new AiConfigStore(path, cipher())
+    await store.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: DEFAULT_AI_MODEL,
+      apiKey: 'sk-existing-key',
+    })
+    const before = readFileSync(path, 'utf8')
+    const unavailableStore = new AiConfigStore(path, cipher(false))
+    await expect(
+      unavailableStore.save({
+        protocol: 'openai',
+        baseUrl: DEFAULT_AI_BASE_URLS.openai,
+        model: 'fixed-model',
+        apiKey: '',
+      }),
+    ).rejects.toThrow('请解锁 macOS 登录钥匙串后重试，配置未保存。')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    await expect(
+      unavailableStore.getPublicConfig()
+    ).resolves.toMatchObject({
+      hasApiKey: false,
+      loadError: expect.stringContaining('请解锁 macOS 登录钥匙串后重试'),
+    })
+  })
+
+  it('serializes concurrent saves so later request wins and older save does not overwrite', async () => {
+    const path = configPath()
+    const slowerEncrypt = cipher()
+    const store = new AiConfigStore(path, {
+      isAvailable: slowerEncrypt.isAvailable,
+      encrypt: async (value) => {
+        if (value === 'sk-first') await tick()
+        return slowerEncrypt.encrypt(value)
+      },
+      decrypt: slowerEncrypt.decrypt,
+    })
+    const first = store.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: 'model-1',
+      apiKey: 'sk-first',
+    })
+    const second = store.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: 'model-2',
+      apiKey: 'sk-second',
+    })
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    const final = JSON.parse(readFileSync(path, 'utf8'))
+    expect(final.model).toBe('model-2')
+    expect(final.encryptedApiKey).not.toContain('sk-first')
+  })
+
+  it('prevents concurrent clear from being overwritten by an in-flight save', async () => {
+    const path = configPath()
+    const delayed = cipher()
+    const store = new AiConfigStore(path, {
+      isAvailable: delayed.isAvailable,
+      encrypt: async (value) => {
+        if (value === 'sk-race') await tick()
+        return delayed.encrypt(value)
+      },
+      decrypt: delayed.decrypt,
+    })
+    await store.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: 'model-0',
+      apiKey: 'sk-initial',
+    })
+    const save = store.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: 'model-3',
+      apiKey: 'sk-race',
+    })
+    const clear = store.clearApiKey()
+    await Promise.all([save, clear])
+    const final = JSON.parse(readFileSync(path, 'utf8'))
+    expect(final.model).toBe('model-0')
+    expect(final.encryptedApiKey).toBeUndefined()
   })
 
   it('persists only encrypted key material and preserves it when key is blank', async () => {

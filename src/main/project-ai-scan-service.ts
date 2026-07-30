@@ -231,6 +231,8 @@ export function parseAiInterpretation(
 export class ProjectAiScanService {
   private readonly preparations = new Map<string, PreparedScan>()
   private readonly active = new Map<string, ActiveScan>()
+  private readonly preparing = new Set<string>()
+  private readonly starting = new Set<string>()
 
   constructor(
     private readonly database: SeePalDatabase,
@@ -244,60 +246,72 @@ export class ProjectAiScanService {
   async prepare(projectId: string): Promise<AiScanPreparationDto> {
     const project = this.database.getProject(projectId)
     if (!project) throw new Error('项目不存在。')
+    if (this.starting.has(projectId)) {
+      throw new Error('这个项目已有 AI 扫描正在运行。')
+    }
     const existing = this.active.get(projectId)
     if (existing?.processing) throw new Error('这个项目已有 AI 扫描正在运行。')
     if (existing) this.active.delete(projectId)
-    const config = await this.aiConfig.getPublicConfig()
-    const sessions = this.database.listSessions(projectId)
-    const allEvidence = this.database.listEvidence(projectId)
-    const evidenceBySession = new Map<string, Evidence[]>()
-    for (const session of sessions) {
-      evidenceBySession.set(
-        session.id,
-        allEvidence.filter((item) => item.sessionId === session.id)
-      )
+    if (this.preparing.has(projectId)) {
+      throw new Error('这个项目已有 AI 扫描正在运行。')
     }
-    const sourceFingerprints = new Map(
-      sessions.map((session) => [
-        session.id,
-        sourceFingerprint(session, evidenceBySession.get(session.id) ?? [])
-      ])
-    )
-    const frozenProviderFingerprint = providerFingerprint(config)
-    const cacheCandidates = new Map<string, AiInterpretation>()
-    for (const session of sessions) {
-      const candidate = this.database.getReusableAiInterpretation(
+
+    this.preparing.add(projectId)
+    try {
+      const config = await this.aiConfig.getPublicConfig()
+      const sessions = this.database.listSessions(projectId)
+      const allEvidence = this.database.listEvidence(projectId)
+      const evidenceBySession = new Map<string, Evidence[]>()
+      for (const session of sessions) {
+        evidenceBySession.set(
+          session.id,
+          allEvidence.filter((item) => item.sessionId === session.id)
+        )
+      }
+      const sourceFingerprints = new Map(
+        sessions.map((session) => [
+          session.id,
+          sourceFingerprint(session, evidenceBySession.get(session.id) ?? [])
+        ])
+      )
+      const frozenProviderFingerprint = providerFingerprint(config)
+      const cacheCandidates = new Map<string, AiInterpretation>()
+      for (const session of sessions) {
+        const candidate = this.database.getReusableAiInterpretation(
+          projectId,
+          session.id,
+          sourceFingerprints.get(session.id)!,
+          frozenProviderFingerprint
+        )
+        if (candidate) cacheCandidates.set(session.id, candidate)
+      }
+      const cachedCount = cacheCandidates.size
+      const id = randomUUID()
+      const dto: AiScanPreparationDto = {
+        id,
         projectId,
-        session.id,
-        sourceFingerprints.get(session.id)!,
-        frozenProviderFingerprint
-      )
-      if (candidate) cacheCandidates.set(session.id, candidate)
+        projectName: project.name,
+        sessionCount: sessions.length,
+        cachedCount,
+        requestCount: sessions.length,
+        providerHost: new URL(config.baseUrl).host,
+        model: config.model,
+        hasApiKey: config.hasApiKey,
+        expiresAt: new Date(this.now().getTime() + PREPARATION_TTL_MS).toISOString()
+      }
+      this.preparations.set(id, {
+        dto,
+        project,
+        sessions,
+        evidenceBySession,
+        sourceFingerprints,
+        cacheCandidates,
+        providerFingerprint: frozenProviderFingerprint
+      })
+      return dto
+    } finally {
+      this.preparing.delete(projectId)
     }
-    const cachedCount = cacheCandidates.size
-    const id = randomUUID()
-    const dto: AiScanPreparationDto = {
-      id,
-      projectId,
-      projectName: project.name,
-      sessionCount: sessions.length,
-      cachedCount,
-      requestCount: sessions.length,
-      providerHost: new URL(config.baseUrl).host,
-      model: config.model,
-      hasApiKey: config.hasApiKey,
-      expiresAt: new Date(this.now().getTime() + PREPARATION_TTL_MS).toISOString()
-    }
-    this.preparations.set(id, {
-      dto,
-      project,
-      sessions,
-      evidenceBySession,
-      sourceFingerprints,
-      cacheCandidates,
-      providerFingerprint: frozenProviderFingerprint
-    })
-    return dto
   }
 
   async start(input: {
@@ -312,25 +326,42 @@ export class ProjectAiScanService {
     if (!preparation || Date.parse(preparation.dto.expiresAt) <= this.now().getTime()) {
       throw new Error('扫描预检已过期，请重新预检。')
     }
-    if (this.active.has(preparation.project.id)) {
+    if (this.active.has(preparation.project.id) || this.starting.has(preparation.project.id)) {
       throw new Error('这个项目已有 AI 扫描正在运行。')
     }
-    const config = await this.aiProvider.snapshotConfig()
-    if (providerFingerprint(config) !== preparation.providerFingerprint) {
-      throw new Error('AI 配置在预检后发生变化，请重新预检。')
-    }
-    const currentProject = this.database.getProject(preparation.project.id)
-    if (!currentProject) throw new Error('项目已被删除。')
-    const scope = await this.git.inspectProject(currentProject.canonicalRootPath)
-    if (!scope.isGitRepository) throw new Error('项目仓库当前不可读取。')
+    this.starting.add(preparation.project.id)
+    try {
+      const config = await this.aiProvider.snapshotConfig()
+      if (providerFingerprint(config) !== preparation.providerFingerprint) {
+        throw new Error('AI 配置在预检后发生变化，请重新预检。')
+      }
+      const currentProject = this.database.getProject(preparation.project.id)
+      if (!currentProject) throw new Error('项目已被删除。')
+      const scope = await this.git.inspectProject(currentProject.canonicalRootPath)
+      if (!scope.isGitRepository) throw new Error('项目仓库当前不可读取。')
 
-    const controller = new AbortController()
-    const frozen = new Map<string, FrozenItem>()
-    for (const session of preparation.sessions) {
-      const evidence = preparation.evidenceBySession.get(session.id) ?? []
-      const source = preparation.sourceFingerprints.get(session.id)!
-      const cached = preparation.cacheCandidates.get(session.id)
-      if (cached) {
+      const controller = new AbortController()
+      const frozen = new Map<string, FrozenItem>()
+      for (const session of preparation.sessions) {
+        const evidence = preparation.evidenceBySession.get(session.id) ?? []
+        const source = preparation.sourceFingerprints.get(session.id)!
+        const cached = preparation.cacheCandidates.get(session.id)
+        if (cached) {
+          frozen.set(session.id, {
+            input: {
+              sessionId: session.id,
+              sessionFingerprint: '',
+              evidenceFingerprint: hash(evidence),
+              contentHash: '',
+              truncated: false,
+              messages: []
+            },
+            sourceFingerprint: source,
+            fingerprint: cached.fingerprint,
+            interpretation: cached
+          })
+          continue
+        }
         frozen.set(session.id, {
           input: {
             sessionId: session.id,
@@ -341,89 +372,79 @@ export class ProjectAiScanService {
             messages: []
           },
           sourceFingerprint: source,
-          fingerprint: cached.fingerprint,
-          interpretation: cached
+          fingerprint: hash({ source, provider: preparation.providerFingerprint, state: 'unfrozen' })
         })
-        continue
       }
-      frozen.set(session.id, {
-        input: {
-          sessionId: session.id,
-          sessionFingerprint: '',
-          evidenceFingerprint: hash(evidence),
-          contentHash: '',
-          truncated: false,
-          messages: []
-        },
-        sourceFingerprint: source,
-        fingerprint: hash({ source, provider: preparation.providerFingerprint, state: 'unfrozen' })
-      })
-    }
 
-    const timestamp = this.now().toISOString()
-    const runId = randomUUID()
-    const items: AiScanItem[] = preparation.sessions.map((session) => {
-      const item = frozen.get(session.id)!
-      const current = this.database.getSession(preparation.project.id, session.id)
-      const currentEvidence = this.database.listEvidence(preparation.project.id, session.id)
-      const stale = !current || sourceFingerprint(current, currentEvidence) !== item.sourceFingerprint
-      return {
-        id: randomUUID(),
-        runId,
+      const timestamp = this.now().toISOString()
+      const runId = randomUUID()
+      const items: AiScanItem[] = preparation.sessions.map((session) => {
+        const item = frozen.get(session.id)!
+        const current = this.database.getSession(preparation.project.id, session.id)
+        const currentEvidence = this.database.listEvidence(preparation.project.id, session.id)
+        const stale = !current || sourceFingerprint(current, currentEvidence) !== item.sourceFingerprint
+        return {
+          id: randomUUID(),
+          runId,
+          projectId: preparation.project.id,
+          sessionId: session.id,
+          sourceFingerprint: item.sourceFingerprint,
+          fingerprint: item.fingerprint,
+          status: stale ? 'stale' : 'pending',
+          attemptCount: 0,
+          error: stale ? 'Session 或 Evidence 在预检后发生变化，请重新扫描。' : undefined,
+          updatedAt: timestamp
+        }
+      })
+      const pendingCount = items.filter((item) => item.status === 'pending').length
+      const staleCount = items.filter((item) => item.status === 'stale').length
+      const failedCount = items.filter((item) => item.status === 'failed').length
+      const run: AiScanRun = {
+        id: runId,
         projectId: preparation.project.id,
-        sessionId: session.id,
-        sourceFingerprint: item.sourceFingerprint,
-        fingerprint: item.fingerprint,
-        status: stale ? 'stale' : 'pending',
-        attemptCount: 0,
-        error: stale ? 'Session 或 Evidence 在预检后发生变化，请重新扫描。' : undefined,
-        updatedAt: timestamp
+        status:
+          pendingCount > 0
+            ? 'running'
+            : staleCount + failedCount > 0 ||
+                currentProject.syncStatus !== 'complete' ||
+                currentProject.coverage?.isComplete === false
+              ? 'partial'
+              : 'completed',
+        providerFingerprint: preparation.providerFingerprint,
+        total: items.length,
+        succeeded: 0,
+        reused: 0,
+        failed: failedCount,
+        stale: staleCount,
+        unknown: 0,
+        pending: pendingCount,
+        startedAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: pendingCount === 0 ? timestamp : undefined
       }
-    })
-    const pendingCount = items.filter((item) => item.status === 'pending').length
-    const staleCount = items.filter((item) => item.status === 'stale').length
-    const failedCount = items.filter((item) => item.status === 'failed').length
-    const run: AiScanRun = {
-      id: runId,
-      projectId: preparation.project.id,
-      status:
-        pendingCount > 0
-          ? 'running'
-          : staleCount + failedCount > 0 ||
-              currentProject.syncStatus !== 'complete' ||
-              currentProject.coverage?.isComplete === false
-            ? 'partial'
-            : 'completed',
-      providerFingerprint: preparation.providerFingerprint,
-      total: items.length,
-      succeeded: 0,
-      reused: 0,
-      failed: failedCount,
-      stale: staleCount,
-      unknown: 0,
-      pending: pendingCount,
-      startedAt: timestamp,
-      updatedAt: timestamp,
-      completedAt: pendingCount === 0 ? timestamp : undefined
+      this.database.createAiScanRun(run, items)
+      const active: ActiveScan = {
+        runId,
+        project: preparation.project,
+        provider: config,
+        items: frozen,
+        preparation,
+        scope,
+        controller,
+        coverageIncomplete:
+          currentProject.syncStatus !== 'complete' ||
+          currentProject.coverage?.isComplete === false
+      }
+      this.active.set(preparation.project.id, active)
+      this.preparations.delete(input.preparationId)
+      this.starting.delete(preparation.project.id)
+      active.processing = this.freezeAndProcess(active)
+      void active.processing
+      return this.status(preparation.project.id)
+    } catch (error) {
+      this.starting.delete(preparation.project.id)
+      throw error
     }
-    this.database.createAiScanRun(run, items)
-    const active: ActiveScan = {
-      runId,
-      project: preparation.project,
-      provider: config,
-      items: frozen,
-      preparation,
-      scope,
-      controller,
-      coverageIncomplete:
-        currentProject.syncStatus !== 'complete' ||
-        currentProject.coverage?.isComplete === false
-    }
-    this.active.set(preparation.project.id, active)
-    this.preparations.delete(input.preparationId)
-    active.processing = this.freezeAndProcess(active)
-    void active.processing
-    return this.status(preparation.project.id)
   }
 
   status(projectId: string): AiScanStatusDto {

@@ -227,6 +227,21 @@ describe('ProjectAiScanService', () => {
     first.database.close()
   })
 
+  it('rejects concurrent prepares for the same project', async () => {
+    const value = fixture()
+    const p1 = value.service.prepare('project-1')
+    const p2 = value.service.prepare('project-1')
+    const [first, second] = await Promise.allSettled([p1, p2])
+    const rejections = [first, second].filter(
+      (item): item is PromiseRejectedResult => item.status === 'rejected',
+    )
+    expect(rejections).toHaveLength(1)
+    expect(rejections[0]!.reason).toMatchObject({
+      message: '这个项目已有 AI 扫描正在运行。',
+    })
+    value.database.close()
+  })
+
   it('does not reuse a candidate when sanitized transcript content changed without metadata changes', async () => {
     const value = fixture()
     await start(value.service)
@@ -357,6 +372,36 @@ describe('ProjectAiScanService', () => {
       unknown: 1
     })
     expect(value.database.listAiInterpretationsForRun(runId)).toEqual([])
+    value.database.close()
+  })
+
+  it('prevents concurrent starts for the same project', async () => {
+    const value = fixture()
+    const firstPrep = await value.service.prepare('project-1')
+    const secondPrep = await value.service.prepare('project-1')
+    const first = value.service.start({
+      preparationId: firstPrep.id,
+      localReadConfirmed: true,
+      remoteSendConfirmed: true
+    })
+    const second = value.service.start({
+      preparationId: secondPrep.id,
+      localReadConfirmed: true,
+      remoteSendConfirmed: true
+    })
+    const [startedFirst, startedSecond] = await Promise.allSettled([first, second])
+    const fulfilled = [startedFirst, startedSecond].filter(
+      (item): item is PromiseFulfilledResult<Awaited<ReturnType<typeof value.service.start>>> => item.status === 'fulfilled'
+    )
+    const rejected = [startedFirst, startedSecond].filter(
+      (item): item is PromiseRejectedResult => item.status === 'rejected'
+    )
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]!.reason).toMatchObject({
+      message: '这个项目已有 AI 扫描正在运行。'
+    })
+    await value.service.cancel('project-1')
     value.database.close()
   })
 })

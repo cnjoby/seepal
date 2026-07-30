@@ -42,6 +42,7 @@ export interface AiProviderConfig {
 
 const MAX_BASE_URL_LENGTH = 2_048
 const MAX_CONFIG_FILE_BYTES = 65_536
+const KEYCHAIN_RETRY_MESSAGE = '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试，配置未保存。'
 
 function defaultConfig(): AiConfigDto {
   return {
@@ -121,109 +122,172 @@ export class AiConfigStore {
     private readonly cipher: AiSecretCipher,
   ) {}
 
-  async getPublicConfig(): Promise<AiConfigDto> {
-    try {
-      const stored = this.readStored()
-      if (!stored) return defaultConfig()
-      if (
-        stored.encryptedApiKey &&
-        (await this.isCipherAvailable())
-      ) {
-        const apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
-        if (!apiKey) throw new TypeError('密钥无法解密。')
-      }
-      return this.toPublic(stored)
-    } catch {
-      return {
-        ...defaultConfig(),
-        loadError: 'AI 配置文件无法读取，已显示默认示例。保存后可恢复。',
-      }
+  private accessQueue = Promise.resolve()
+  private mutationVersion = 0
+
+  private enqueueAccess<T>(task: () => Promise<T>): Promise<T> {
+    const queued = this.accessQueue.then(task)
+    this.accessQueue = queued.then(
+      () => undefined,
+      () => undefined,
+    )
+    return queued
+  }
+
+  private async ensureStoredKeyReadable(stored: StoredAiConfig): Promise<void> {
+    if (!stored.encryptedApiKey) return
+    if (!(await this.isCipherAvailable())) {
+      throw new Error(KEYCHAIN_RETRY_MESSAGE)
     }
+    const apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
+    if (!apiKey) {
+      throw new Error(KEYCHAIN_RETRY_MESSAGE)
+    }
+  }
+
+  private startMutation(): number {
+    this.mutationVersion += 1
+    return this.mutationVersion
+  }
+
+  private isLatestMutation(token: number): boolean {
+    return token === this.mutationVersion
+  }
+
+  async getPublicConfig(): Promise<AiConfigDto> {
+    return this.enqueueAccess(async () => {
+      try {
+        const stored = this.readStored()
+        if (!stored) return defaultConfig()
+        if (!stored.encryptedApiKey) return this.toPublic(stored)
+        if (!(await this.isCipherAvailable())) {
+          return {
+            protocol: stored.protocol,
+            baseUrl: stored.baseUrl,
+            model: stored.model,
+            hasApiKey: false,
+            loadError: KEYCHAIN_RETRY_MESSAGE,
+          }
+        }
+        const apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
+        if (!apiKey) {
+          return {
+            protocol: stored.protocol,
+            baseUrl: stored.baseUrl,
+            model: stored.model,
+            hasApiKey: false,
+            loadError: '已保存的 API Key 无法解密，请清除后重新保存。',
+          }
+        }
+        return this.toPublic(stored)
+      } catch {
+        return {
+          ...defaultConfig(),
+          loadError: 'AI 配置文件无法读取，已显示默认示例。保存后可恢复。',
+        }
+      }
+    })
   }
 
   async save(input: AiConfigInput): Promise<AiConfigDto> {
-    const protocol = validateProtocol(input.protocol)
-    const baseUrl = validateBaseUrl(input.baseUrl)
-    const model = validateModel(input.model)
-    const normalizedApiKey = input.apiKey?.trim()
-    const newApiKey = normalizedApiKey ? normalizedApiKey : undefined
-    const current = this.readStored()
+    const token = this.startMutation()
+    return this.enqueueAccess(async () => {
+      const protocol = validateProtocol(input.protocol)
+      const baseUrl = validateBaseUrl(input.baseUrl)
+      const model = validateModel(input.model)
+      const normalizedApiKey = input.apiKey?.trim()
+      const newApiKey = normalizedApiKey ? normalizedApiKey : undefined
+      const current = this.readStored()
 
-    let encryptedApiKey = current?.encryptedApiKey
-    if (
-      current &&
-      encryptedApiKey &&
-      newApiKey === undefined &&
-      new URL(current.baseUrl).origin !== new URL(baseUrl).origin
-    ) {
-      throw new Error('更换模型服务域名时，请重新输入 API Key。原配置未修改。')
-    }
-    if (newApiKey !== undefined) {
-      if (!(await this.isCipherAvailable())) {
-        throw new Error(
-          '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试，配置未保存。',
-        )
+      let encryptedApiKey = current?.encryptedApiKey
+      if (
+        current &&
+        encryptedApiKey &&
+        newApiKey === undefined &&
+        new URL(current.baseUrl).origin !== new URL(baseUrl).origin
+      ) {
+        throw new Error('更换模型服务域名时，请重新输入 API Key。原配置未修改。')
       }
-      try {
-        encryptedApiKey = await this.cipher.encrypt(newApiKey)
-      } catch {
-        throw new Error(
-          '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试，配置未保存。',
-        )
+      if (current && current.encryptedApiKey && newApiKey === undefined) {
+        await this.ensureStoredKeyReadable(current)
       }
-    }
+      if (newApiKey !== undefined) {
+        if (!(await this.isCipherAvailable())) {
+          throw new Error(KEYCHAIN_RETRY_MESSAGE)
+        }
+        try {
+          encryptedApiKey = await this.cipher.encrypt(newApiKey)
+        } catch {
+          throw new Error(KEYCHAIN_RETRY_MESSAGE)
+        }
+      }
 
-    const next: StoredAiConfig = {
-      version: 1,
-      protocol,
-      baseUrl,
-      model,
-      encryptedApiKey,
-    }
-    this.writeAtomic(next)
-    return this.toPublic(next)
+      const next: StoredAiConfig = {
+        version: 1,
+        protocol,
+        baseUrl,
+        model,
+        encryptedApiKey,
+      }
+      if (!this.isLatestMutation(token)) {
+        return this.toPublic(this.readStored() ?? {
+          version: 1,
+          protocol: 'openai',
+          baseUrl: DEFAULT_AI_BASE_URLS.openai,
+          model: DEFAULT_AI_MODEL,
+        })
+      }
+      this.writeAtomic(next)
+      return this.toPublic(next)
+    })
   }
 
   async clearApiKey(): Promise<AiConfigDto> {
-    const current = this.readStored() ?? {
-      version: 1,
-      protocol: 'openai',
-      baseUrl: DEFAULT_AI_BASE_URLS.openai,
-      model: DEFAULT_AI_MODEL,
-    }
-    const { encryptedApiKey: _removed, ...next } = current
-    this.writeAtomic(next)
-    return this.toPublic(next)
+    const token = this.startMutation()
+    return this.enqueueAccess(async () => {
+      const current = this.readStored() ?? {
+        version: 1,
+        protocol: 'openai',
+        baseUrl: DEFAULT_AI_BASE_URLS.openai,
+        model: DEFAULT_AI_MODEL,
+      }
+      const { encryptedApiKey: _removed, ...next } = current
+      if (!this.isLatestMutation(token)) {
+        return this.toPublic(current)
+      }
+      this.writeAtomic(next)
+      return this.toPublic(next)
+    })
   }
 
   async getProviderConfig(): Promise<AiProviderConfig> {
-    let stored: StoredAiConfig | undefined
-    try {
-      stored = this.readStored()
-    } catch {
-      throw new Error('AI 配置文件无法读取，请重新保存配置。')
-    }
-    if (!stored?.encryptedApiKey) {
-      throw new Error('请先保存 API Key。')
-    }
-    if (!(await this.isCipherAvailable())) {
-      throw new Error(
-        '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试。',
-      )
-    }
-    let apiKey: string
-    try {
-      apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
-    } catch {
-      throw new Error('已保存的 API Key 无法解密，请清除后重新保存。')
-    }
-    if (!apiKey) throw new Error('请先保存 API Key。')
-    return {
-      protocol: stored.protocol,
-      baseUrl: stored.baseUrl,
-      model: stored.model,
-      apiKey,
-    }
+    return this.enqueueAccess(async () => {
+      let stored: StoredAiConfig | undefined
+      try {
+        stored = this.readStored()
+      } catch {
+        throw new Error('AI 配置文件无法读取，请重新保存配置。')
+      }
+      if (!stored?.encryptedApiKey) {
+        throw new Error('请先保存 API Key。')
+      }
+      if (!(await this.isCipherAvailable())) {
+        throw new Error(KEYCHAIN_RETRY_MESSAGE)
+      }
+      let apiKey: string
+      try {
+        apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
+      } catch {
+        throw new Error('已保存的 API Key 无法解密，请清除后重新保存。')
+      }
+      if (!apiKey) throw new Error('请先保存 API Key。')
+      return {
+        protocol: stored.protocol,
+        baseUrl: stored.baseUrl,
+        model: stored.model,
+        apiKey,
+      }
+    })
   }
 
   private readStored(): StoredAiConfig | undefined {
