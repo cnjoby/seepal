@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="SeePal helps you inspect all your vibe coding sessions from local AI coding tools in one clear dashboard."
+    />
+    <meta name="keywords" content="SeePal, AI coding, Codex, session dashboard, developer productivity" />
+    <meta name="author" content="SeePal Team" />
+    <link rel="canonical" href="https://seepal.ai/" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%230f2d5d' d='M32 4l21 12v24l-21 12L11 40V16z'/%3E%3Cpath fill='%23ffb84d' d='M32 12l13 7.4V36L32 43.4 19 36V19.4z'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <title>SeePal — Seepal.ai</title>
+  </head>
+  <body>
+    <div class="ambient-surface">
+      <div class="grain-layer" aria-hidden="true"></div>
+      <div class="glow glow-one" aria-hidden="true"></div>
+      <div class="glow glow-two" aria-hidden="true"></div>
+    </div>
+
+    <header class="site-header">
+      <div class="container nav-inner">
+        <a class="brand" href="#top" aria-label="SeePal home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>SeePal</span>
+        </a>
+        <nav aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <a class="button" href="#download">Get it now</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="section hero">
+        <div class="container hero-grid">
+          <div>
+            <p class="eyebrow">Seepal for AI builders</p>
+            <h1>See all your vibe coding sessions in one place</h1>
+            <p class="lead">
+              SeePal is a lightweight local desktop console for Codex-style coding sessions.
+              Track status, branch context, and key progress signals in one clean timeline
+              without sending code to the cloud.
+            </p>
+            <div class="hero-actions">
+              <a class="button" href="#download">Start with SeePal</a>
+              <a class="button button-ghost" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">
+                Open Source on GitHub
+              </a>
+            </div>
+          </div>
+          <div class="hero-panel">
+            <div class="code-frame" role="img" aria-label="Session dashboard preview">
+              <div class="frame-head">
+                <span></span><span></span><span></span>
+              </div>
+              <ul>
+                <li>
+                  <strong>project:</strong> seepal-dashboard
+                  <span>attention: 3 unresolved</span>
+                </li>
+                <li>
+                  <strong>session:</strong> debug-codex-batch
+                  <span>branch: feat/typing-pulse</span>
+                </li>
+                <li>
+                  <strong>status:</strong> needs-review
+                  <span>type: bugfix · ai-scan ready</span>
+                </li>
+                <li>
+                  <strong>updated:</strong> 12 min ago
+                  <span>model: codex-1</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section features">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">Built for flow</p>
+            <h2>One place for signal, no signal-noise</h2>
+          </header>
+          <div class="grid cards">
+            <article>
+              <h3>Local-first by design</h3>
+              <p>
+                All metadata is indexed on your machine. No code indexing in the cloud,
+                no account required, no extra account-level permission prompts.
+              </p>
+            </article>
+            <article>
+              <h3>Session clarity</h3>
+              <p>
+                See when each session started, what branch it belongs to, and whether it is
+                waiting, in progress, or complete.
+              </p>
+            </article>
+            <article>
+              <h3>Attention-aware view</h3>
+              <p>
+                Filter, prioritize, and jump straight to active sessions that need action.
+                Keep your context from being split across terminal windows.
+              </p>
+            </article>
+            <article>
+              <h3>Private AI interpretation</h3>
+              <p>
+                Optional AI scan supports richer summaries while preserving your local boundary.
+                You decide what is allowed to be sent to a model.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="section split">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">How it works</p>
+            <h2>From terminal chatter to clear status map in under a minute</h2>
+          </header>
+          <div class="timeline">
+            <div><strong>1</strong>Pick a repo to inspect</div>
+            <div><strong>2</strong>Load local Codex sessions and sessions metadata</div>
+            <div><strong>3</strong>Tag, filter, and review completion state</div>
+            <div><strong>4</strong>Use AI scan for context when you need a fast recap</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="section faq">
+        <div class="container">
+          <header class="section-head">
+            <p class="eyebrow">FAQ</p>
+            <h2>Questions</h2>
+          </header>
+          <details>
+            <summary>Does SeePal work without internet?</summary>
+            <p>After setup, the dashboard runs locally and keeps core features online-free.</p>
+          </details>
+          <details>
+            <summary>What coding tools can I use?</summary>
+            <p>SeePal focuses on Codex-style thread history and local Git context in this phase.</p>
+          </details>
+          <details>
+            <summary>Is my source code uploaded?</summary>
+            <p>Source code is not uploaded by default. AI interpretation is opt-in and local prompts are clearly controlled.</p>
+          </details>
+        </div>
+      </section>
+
+      <section id="download" class="section cta">
+        <div class="container">
+          <h2>Ready to see your session history clearly?</h2>
+          <p>Download the macOS build and start from your local workspace.</p>
+          <a class="button button-large" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">
+            Download SeePal
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <p>© <span id="year"></span> SeePal · seepal.ai</p>
+        <a href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </footer>
+
+    <script>
+      document.querySelector('#year').textContent = new Date().getFullYear()
+      const links = document.querySelectorAll('nav a[href^="#"]')
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return
+            links.forEach((link) => {
+              link.classList.toggle(
+                'active',
+                link.getAttribute('href').slice(1) === entry.target.id,
+              )
+            })
+          })
+        },
+        { rootMargin: '-40% 0px -50% 0px' },
+      )
+      document.querySelectorAll('main section[id]').forEach((sec) => observer.observe(sec))
+    </script>
+  </body>
+</html>
