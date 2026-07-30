@@ -51,9 +51,9 @@ describe('AI IPC handlers', () => {
     hasApiKey: true,
   }
   const aiConfig = {
-    getPublicConfig: vi.fn(() => publicConfig),
-    save: vi.fn(() => publicConfig),
-    clearApiKey: vi.fn(() => ({ ...publicConfig, hasApiKey: false })),
+    getPublicConfig: vi.fn(async () => publicConfig),
+    save: vi.fn(async () => publicConfig),
+    clearApiKey: vi.fn(async () => ({ ...publicConfig, hasApiKey: false })),
   }
   const aiProvider = {
     testConnection: vi.fn(async () => ({

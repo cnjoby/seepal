@@ -9,7 +9,7 @@ function source(
   overrides: Partial<AiProviderConfig> = {},
 ): AiConfigSource {
   return {
-    getProviderConfig: () => ({
+    getProviderConfig: async () => ({
       protocol: 'openai',
       baseUrl: 'https://api.example.com',
       model: 'example-model',
@@ -20,6 +20,36 @@ function source(
 }
 
 describe('AiProviderClient', () => {
+  it('waits for asynchronous config decryption before sending the request', async () => {
+    let configResolved = false
+    const fetcher = vi.fn(async () => {
+      expect(configResolved).toBe(true)
+      return Response.json({
+        choices: [{ message: { content: 'OK' } }],
+      })
+    })
+    const client = new AiProviderClient(
+      {
+        getProviderConfig: async () => {
+          await Promise.resolve()
+          configResolved = true
+          return {
+            protocol: 'openai',
+            baseUrl: 'https://api.example.com',
+            model: 'example-model',
+            apiKey: 'sk-async-provider-test-value',
+          }
+        },
+      },
+      fetcher,
+    )
+
+    await expect(client.generateText('hello')).resolves.toMatchObject({
+      text: 'OK',
+    })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it('uses the OpenAI-compatible path and bearer authentication', async () => {
     const fetcher = vi.fn(async (
       _input: string | URL | Request,

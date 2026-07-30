@@ -24,9 +24,9 @@ function configPath(): string {
 
 function cipher(available = true): AiSecretCipher {
   return {
-    isAvailable: () => available,
-    encrypt: (value) => Buffer.from(value, 'utf8').toString('base64'),
-    decrypt: (value) => Buffer.from(value, 'base64').toString('utf8'),
+    isAvailable: async () => available,
+    encrypt: async (value) => Buffer.from(value, 'utf8').toString('base64'),
+    decrypt: async (value) => Buffer.from(value, 'base64').toString('utf8'),
   }
 }
 
@@ -40,11 +40,11 @@ afterEach(async () => {
 })
 
 describe('AiConfigStore', () => {
-  it('returns examples without creating a config file', () => {
+  it('returns examples without creating a config file', async () => {
     const path = configPath()
     const store = new AiConfigStore(path, cipher())
 
-    expect(store.getPublicConfig()).toEqual({
+    await expect(store.getPublicConfig()).resolves.toEqual({
       protocol: 'openai',
       baseUrl: DEFAULT_AI_BASE_URLS.openai,
       model: DEFAULT_AI_MODEL,
@@ -53,44 +53,44 @@ describe('AiConfigStore', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('persists only encrypted key material and preserves it when key is blank', () => {
+  it('persists only encrypted key material and preserves it when key is blank', async () => {
     const path = configPath()
     const store = new AiConfigStore(path, cipher())
     const secret = 'sk-test-only-value'
 
-    expect(
+    await expect(
       store.save({
         protocol: 'anthropic',
         baseUrl: DEFAULT_AI_BASE_URLS.anthropic,
         model: DEFAULT_AI_MODEL,
         apiKey: secret,
       }),
-    ).toMatchObject({ hasApiKey: true })
+    ).resolves.toMatchObject({ hasApiKey: true })
     expect(readFileSync(path, 'utf8')).not.toContain(secret)
 
     const reopened = new AiConfigStore(path, cipher())
-    expect(reopened.getPublicConfig()).toEqual({
+    await expect(reopened.getPublicConfig()).resolves.toEqual({
       protocol: 'anthropic',
       baseUrl: DEFAULT_AI_BASE_URLS.anthropic,
       model: DEFAULT_AI_MODEL,
       hasApiKey: true,
     })
-    reopened.save({
+    await reopened.save({
       protocol: 'anthropic',
       baseUrl: DEFAULT_AI_BASE_URLS.anthropic,
       model: 'deepseek-next',
       apiKey: '',
     })
-    expect(reopened.getProviderConfig()).toMatchObject({
+    await expect(reopened.getProviderConfig()).resolves.toMatchObject({
       apiKey: secret,
       model: 'deepseek-next',
     })
   })
 
-  it('requires the key again before moving it to another service origin', () => {
+  it('requires the key again before moving it to another service origin', async () => {
     const path = configPath()
     const store = new AiConfigStore(path, cipher())
-    store.save({
+    await store.save({
       protocol: 'openai',
       baseUrl: DEFAULT_AI_BASE_URLS.openai,
       model: DEFAULT_AI_MODEL,
@@ -98,21 +98,52 @@ describe('AiConfigStore', () => {
     })
     const before = readFileSync(path, 'utf8')
 
-    expect(() =>
+    await expect(
       store.save({
         protocol: 'openai',
         baseUrl: 'https://api.example.com',
         model: DEFAULT_AI_MODEL,
       }),
-    ).toThrow('请重新输入 API Key')
+    ).rejects.toThrow('请重新输入 API Key')
     expect(readFileSync(path, 'utf8')).toBe(before)
-    expect(store.getProviderConfig().apiKey).toBe('sk-origin-bound-test-value')
+    await expect(store.getProviderConfig()).resolves.toMatchObject({
+      apiKey: 'sk-origin-bound-test-value',
+    })
   })
 
-  it('does not overwrite the old config when encryption is unavailable', () => {
+  it('waits for asynchronous keychain initialization instead of using a synchronous availability result', async () => {
+    const path = configPath()
+    let initialized = false
+    const asynchronousCipher: AiSecretCipher = {
+      isAvailable: async () => {
+        await Promise.resolve()
+        initialized = true
+        return true
+      },
+      encrypt: async (value) => {
+        expect(initialized).toBe(true)
+        return Buffer.from(value, 'utf8').toString('base64')
+      },
+      decrypt: async (value) =>
+        Buffer.from(value, 'base64').toString('utf8'),
+    }
+    const store = new AiConfigStore(path, asynchronousCipher)
+
+    await expect(
+      store.save({
+        protocol: 'openai',
+        baseUrl: DEFAULT_AI_BASE_URLS.openai,
+        model: DEFAULT_AI_MODEL,
+        apiKey: 'sk-async-test-value',
+      }),
+    ).resolves.toMatchObject({ hasApiKey: true })
+    expect(readFileSync(path, 'utf8')).not.toContain('sk-async-test-value')
+  })
+
+  it('does not overwrite the old config when encryption is unavailable', async () => {
     const path = configPath()
     const availableStore = new AiConfigStore(path, cipher())
-    availableStore.save({
+    await availableStore.save({
       protocol: 'openai',
       baseUrl: DEFAULT_AI_BASE_URLS.openai,
       model: DEFAULT_AI_MODEL,
@@ -121,55 +152,89 @@ describe('AiConfigStore', () => {
     const before = readFileSync(path, 'utf8')
 
     const unavailableStore = new AiConfigStore(path, cipher(false))
-    expect(() =>
+    await expect(
       unavailableStore.save({
         protocol: 'openai',
         baseUrl: 'https://example.com',
         model: 'different-model',
         apiKey: 'sk-replacement-test-value',
       }),
-    ).toThrow('系统安全存储当前不可用')
+    ).rejects.toThrow('请解锁 macOS 登录钥匙串后重试')
     expect(readFileSync(path, 'utf8')).toBe(before)
   })
 
-  it('clears only the API key and rejects unsafe base URLs', () => {
+  it('maps encryption failures to the safe keychain prompt without overwriting', async () => {
+    const path = configPath()
+    const availableStore = new AiConfigStore(path, cipher())
+    await availableStore.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: DEFAULT_AI_MODEL,
+      apiKey: 'sk-existing-encryption-test-value',
+    })
+    const before = readFileSync(path, 'utf8')
+    const failingStore = new AiConfigStore(path, {
+      isAvailable: async () => true,
+      encrypt: async () => {
+        throw new Error('secret keychain implementation detail')
+      },
+      decrypt: async (value) =>
+        Buffer.from(value, 'base64').toString('utf8'),
+    })
+
+    const operation = failingStore.save({
+      protocol: 'openai',
+      baseUrl: DEFAULT_AI_BASE_URLS.openai,
+      model: 'replacement-model',
+      apiKey: 'sk-replacement-encryption-test-value',
+    })
+    await expect(operation).rejects.toThrow(
+      '请解锁 macOS 登录钥匙串后重试',
+    )
+    await expect(operation).rejects.not.toThrow(
+      'secret keychain implementation detail',
+    )
+    expect(readFileSync(path, 'utf8')).toBe(before)
+  })
+
+  it('clears only the API key and rejects unsafe base URLs', async () => {
     const path = configPath()
     const store = new AiConfigStore(path, cipher())
-    store.save({
+    await store.save({
       protocol: 'anthropic',
       baseUrl: DEFAULT_AI_BASE_URLS.anthropic,
       model: DEFAULT_AI_MODEL,
       apiKey: 'sk-clear-test-value',
     })
 
-    expect(store.clearApiKey()).toEqual({
+    await expect(store.clearApiKey()).resolves.toEqual({
       protocol: 'anthropic',
       baseUrl: DEFAULT_AI_BASE_URLS.anthropic,
       model: DEFAULT_AI_MODEL,
       hasApiKey: false,
     })
-    expect(() => store.getProviderConfig()).toThrow('请先保存 API Key')
-    expect(() =>
+    await expect(store.getProviderConfig()).rejects.toThrow('请先保存 API Key')
+    await expect(
       store.save({
         protocol: 'openai',
         baseUrl: 'https://user@example.com/path?token=value',
         model: DEFAULT_AI_MODEL,
       }),
-    ).toThrow('Base URL 必须')
+    ).rejects.toThrow('Base URL 必须')
   })
 
-  it('falls back to examples with a recoverable error for corrupt data', () => {
+  it('falls back to examples with a recoverable error for corrupt data', async () => {
     const path = configPath()
     writeFileSync(path, '{not json', 'utf8')
 
-    expect(new AiConfigStore(path, cipher()).getPublicConfig()).toMatchObject({
+    await expect(new AiConfigStore(path, cipher()).getPublicConfig()).resolves.toMatchObject({
       baseUrl: DEFAULT_AI_BASE_URLS.openai,
       hasApiKey: false,
       loadError: expect.stringContaining('无法读取'),
     })
   })
 
-  it('treats an undecryptable key as corrupt instead of reporting it as saved', () => {
+  it('treats an undecryptable key as corrupt instead of reporting it as saved', async () => {
     const path = configPath()
     writeFileSync(
       path,
@@ -183,51 +248,51 @@ describe('AiConfigStore', () => {
       'utf8',
     )
     const brokenCipher: AiSecretCipher = {
-      isAvailable: () => true,
-      encrypt: (value) => value,
-      decrypt: () => {
+      isAvailable: async () => true,
+      encrypt: async (value) => value,
+      decrypt: async () => {
         throw new Error('secret decrypt detail')
       },
     }
 
-    expect(new AiConfigStore(path, brokenCipher).getPublicConfig()).toMatchObject({
+    await expect(new AiConfigStore(path, brokenCipher).getPublicConfig()).resolves.toMatchObject({
       baseUrl: DEFAULT_AI_BASE_URLS.openai,
       hasApiKey: false,
       loadError: expect.stringContaining('无法读取'),
     })
   })
 
-  it('does not overwrite corrupt data while saving or clearing', () => {
+  it('does not overwrite corrupt data while saving or clearing', async () => {
     const path = configPath()
     writeFileSync(path, '{not json', 'utf8')
     const before = readFileSync(path, 'utf8')
     const store = new AiConfigStore(path, cipher())
 
-    expect(() =>
+    await expect(
       store.save({
         protocol: 'openai',
         baseUrl: DEFAULT_AI_BASE_URLS.openai,
         model: DEFAULT_AI_MODEL,
       }),
-    ).toThrow()
-    expect(() => store.clearApiKey()).toThrow()
+    ).rejects.toThrow()
+    await expect(store.clearApiKey()).rejects.toThrow()
     expect(readFileSync(path, 'utf8')).toBe(before)
   })
 
-  it('rejects empty query or fragment delimiters and oversized URLs', () => {
+  it('rejects empty query or fragment delimiters and oversized URLs', async () => {
     const store = new AiConfigStore(configPath(), cipher())
     for (const baseUrl of [
       'https://example.com?',
       'https://example.com#',
       `https://example.com/${'x'.repeat(2_100)}`,
     ]) {
-      expect(() =>
+      await expect(
         store.save({
           protocol: 'openai',
           baseUrl,
           model: DEFAULT_AI_MODEL,
         }),
-      ).toThrow('Base URL 必须')
+      ).rejects.toThrow('Base URL 必须')
     }
   })
 })

@@ -100,7 +100,7 @@ function fixture(count = 1, partial = false) {
     }
   }
   const provider = {
-    snapshotConfig: () => ({ ...config }),
+    snapshotConfig: async () => ({ ...config }),
     generateTextWithConfig: async (
       _prompt: string,
       _config: unknown,
@@ -142,7 +142,7 @@ function fixture(count = 1, partial = false) {
     } as never,
     codex as never,
     {
-      getPublicConfig: () => ({
+      getPublicConfig: async () => ({
         protocol: config.protocol,
         baseUrl: config.baseUrl,
         model: config.model,

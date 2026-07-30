@@ -68,11 +68,12 @@ app.whenReady().then(() => {
   const aiConfig = new AiConfigStore(
     join(app.getPath('userData'), 'ai-provider.json'),
     {
-      isAvailable: () => safeStorage.isEncryptionAvailable(),
-      encrypt: (value) =>
-        safeStorage.encryptString(value).toString('base64'),
-      decrypt: (value) =>
-        safeStorage.decryptString(Buffer.from(value, 'base64')),
+      isAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
+      encrypt: async (value) =>
+        (await safeStorage.encryptStringAsync(value)).toString('base64'),
+      decrypt: async (value) =>
+        (await safeStorage.decryptStringAsync(Buffer.from(value, 'base64')))
+          .result,
     },
   )
   const aiProvider = new AiProviderClient(aiConfig)

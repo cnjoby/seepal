@@ -247,7 +247,7 @@ export class ProjectAiScanService {
     const existing = this.active.get(projectId)
     if (existing?.processing) throw new Error('这个项目已有 AI 扫描正在运行。')
     if (existing) this.active.delete(projectId)
-    const config = this.aiConfig.getPublicConfig()
+    const config = await this.aiConfig.getPublicConfig()
     const sessions = this.database.listSessions(projectId)
     const allEvidence = this.database.listEvidence(projectId)
     const evidenceBySession = new Map<string, Evidence[]>()
@@ -315,7 +315,7 @@ export class ProjectAiScanService {
     if (this.active.has(preparation.project.id)) {
       throw new Error('这个项目已有 AI 扫描正在运行。')
     }
-    const config = this.aiProvider.snapshotConfig()
+    const config = await this.aiProvider.snapshotConfig()
     if (providerFingerprint(config) !== preparation.providerFingerprint) {
       throw new Error('AI 配置在预检后发生变化，请重新预检。')
     }

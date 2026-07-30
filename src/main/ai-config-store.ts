@@ -20,9 +20,9 @@ import {
 export { DEFAULT_AI_BASE_URLS, DEFAULT_AI_MODEL }
 
 export interface AiSecretCipher {
-  isAvailable(): boolean
-  encrypt(value: string): string
-  decrypt(value: string): string
+  isAvailable(): Promise<boolean>
+  encrypt(value: string): Promise<string>
+  decrypt(value: string): Promise<string>
 }
 
 interface StoredAiConfig {
@@ -121,10 +121,17 @@ export class AiConfigStore {
     private readonly cipher: AiSecretCipher,
   ) {}
 
-  getPublicConfig(): AiConfigDto {
+  async getPublicConfig(): Promise<AiConfigDto> {
     try {
       const stored = this.readStored()
       if (!stored) return defaultConfig()
+      if (
+        stored.encryptedApiKey &&
+        (await this.isCipherAvailable())
+      ) {
+        const apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
+        if (!apiKey) throw new TypeError('密钥无法解密。')
+      }
       return this.toPublic(stored)
     } catch {
       return {
@@ -134,7 +141,7 @@ export class AiConfigStore {
     }
   }
 
-  save(input: AiConfigInput): AiConfigDto {
+  async save(input: AiConfigInput): Promise<AiConfigDto> {
     const protocol = validateProtocol(input.protocol)
     const baseUrl = validateBaseUrl(input.baseUrl)
     const model = validateModel(input.model)
@@ -152,10 +159,18 @@ export class AiConfigStore {
       throw new Error('更换模型服务域名时，请重新输入 API Key。原配置未修改。')
     }
     if (newApiKey !== undefined) {
-      if (!this.cipher.isAvailable()) {
-        throw new Error('系统安全存储当前不可用，配置未保存。')
+      if (!(await this.isCipherAvailable())) {
+        throw new Error(
+          '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试，配置未保存。',
+        )
       }
-      encryptedApiKey = this.cipher.encrypt(newApiKey)
+      try {
+        encryptedApiKey = await this.cipher.encrypt(newApiKey)
+      } catch {
+        throw new Error(
+          '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试，配置未保存。',
+        )
+      }
     }
 
     const next: StoredAiConfig = {
@@ -169,7 +184,7 @@ export class AiConfigStore {
     return this.toPublic(next)
   }
 
-  clearApiKey(): AiConfigDto {
+  async clearApiKey(): Promise<AiConfigDto> {
     const current = this.readStored() ?? {
       version: 1,
       protocol: 'openai',
@@ -181,7 +196,7 @@ export class AiConfigStore {
     return this.toPublic(next)
   }
 
-  getProviderConfig(): AiProviderConfig {
+  async getProviderConfig(): Promise<AiProviderConfig> {
     let stored: StoredAiConfig | undefined
     try {
       stored = this.readStored()
@@ -191,12 +206,14 @@ export class AiConfigStore {
     if (!stored?.encryptedApiKey) {
       throw new Error('请先保存 API Key。')
     }
-    if (!this.cipher.isAvailable()) {
-      throw new Error('系统安全存储当前不可用，无法读取 API Key。')
+    if (!(await this.isCipherAvailable())) {
+      throw new Error(
+        '系统安全存储当前不可用。请解锁 macOS 登录钥匙串后重试。',
+      )
     }
     let apiKey: string
     try {
-      apiKey = this.cipher.decrypt(stored.encryptedApiKey)
+      apiKey = await this.cipher.decrypt(stored.encryptedApiKey)
     } catch {
       throw new Error('已保存的 API Key 无法解密，请清除后重新保存。')
     }
@@ -229,15 +246,19 @@ export class AiConfigStore {
   }
 
   private toPublic(stored: StoredAiConfig): AiConfigDto {
-    if (stored.encryptedApiKey && this.cipher.isAvailable()) {
-      const decrypted = this.cipher.decrypt(stored.encryptedApiKey)
-      if (!decrypted) throw new TypeError('密钥无法解密。')
-    }
     return {
       protocol: stored.protocol,
       baseUrl: stored.baseUrl,
       model: stored.model,
       hasApiKey: Boolean(stored.encryptedApiKey),
+    }
+  }
+
+  private async isCipherAvailable(): Promise<boolean> {
+    try {
+      return await this.cipher.isAvailable()
+    } catch {
+      return false
     }
   }
 

@@ -3,7 +3,7 @@ import type { AiProviderConfig } from './ai-config-store.js'
 const CONNECTION_TEST_PROMPT = 'Reply with exactly OK.'
 
 export interface AiConfigSource {
-  getProviderConfig(): AiProviderConfig
+  getProviderConfig(): Promise<AiProviderConfig>
 }
 
 export interface AiGenerationResult {
@@ -36,11 +36,14 @@ export class AiProviderClient {
   }
 
   async generateText(prompt: string): Promise<AiGenerationResult> {
-    return this.generateTextWithConfig(prompt, this.configSource.getProviderConfig())
+    return this.generateTextWithConfig(
+      prompt,
+      await this.configSource.getProviderConfig(),
+    )
   }
 
-  snapshotConfig(): AiProviderConfig {
-    return { ...this.configSource.getProviderConfig() }
+  async snapshotConfig(): Promise<AiProviderConfig> {
+    return { ...(await this.configSource.getProviderConfig()) }
   }
 
   async generateTextWithConfig(
