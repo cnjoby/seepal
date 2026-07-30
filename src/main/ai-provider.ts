@@ -36,15 +36,29 @@ export class AiProviderClient {
   }
 
   async generateText(prompt: string): Promise<AiGenerationResult> {
-    const config = this.configSource.getProviderConfig()
+    return this.generateTextWithConfig(prompt, this.configSource.getProviderConfig())
+  }
+
+  snapshotConfig(): AiProviderConfig {
+    return { ...this.configSource.getProviderConfig() }
+  }
+
+  async generateTextWithConfig(
+    prompt: string,
+    config: AiProviderConfig,
+    signal?: AbortSignal,
+    maxTokens = 128
+  ): Promise<AiGenerationResult> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    const abort = () => controller.abort()
+    signal?.addEventListener('abort', abort, { once: true })
 
     try {
       const response =
         config.protocol === 'openai'
-          ? await this.requestOpenAi(config, prompt, controller.signal)
-          : await this.requestAnthropic(config, prompt, controller.signal)
+          ? await this.requestOpenAi(config, prompt, controller.signal, maxTokens)
+          : await this.requestAnthropic(config, prompt, controller.signal, maxTokens)
       if (!response.ok) {
         await response.body?.cancel()
         throw new Error(`模型服务返回 HTTP ${response.status}。`)
@@ -54,6 +68,9 @@ export class AiProviderClient {
         ? this.parseOpenAi(payload, config.model)
         : this.parseAnthropic(payload, config.model)
     } catch (error) {
+      if (signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError')
+      }
       if (controller.signal.aborted) {
         throw new Error('连接模型服务超时，请检查网络后重试。')
       }
@@ -68,6 +85,7 @@ export class AiProviderClient {
       throw new Error('无法连接模型服务，请检查 Base URL 和网络。')
     } finally {
       clearTimeout(timeout)
+      signal?.removeEventListener('abort', abort)
     }
   }
 
@@ -75,6 +93,7 @@ export class AiProviderClient {
     config: AiProviderConfig,
     prompt: string,
     signal: AbortSignal,
+    maxTokens: number,
   ): Promise<Response> {
     return this.fetcher(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -87,7 +106,7 @@ export class AiProviderClient {
       body: JSON.stringify({
         model: config.model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 128,
+        max_tokens: maxTokens,
         stream: false,
       }),
     })
@@ -97,6 +116,7 @@ export class AiProviderClient {
     config: AiProviderConfig,
     prompt: string,
     signal: AbortSignal,
+    maxTokens: number,
   ): Promise<Response> {
     return this.fetcher(`${config.baseUrl}/v1/messages`, {
       method: 'POST',
@@ -110,7 +130,7 @@ export class AiProviderClient {
       body: JSON.stringify({
         model: config.model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 128,
+        max_tokens: maxTokens,
       }),
     })
   }

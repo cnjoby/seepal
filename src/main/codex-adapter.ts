@@ -1,5 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { realpath } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { open, realpath } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { basename, join, relative, sep } from 'node:path'
 
 import {
   CodexLogActivitySource,
@@ -7,6 +10,8 @@ import {
 } from './codex-activity-source.js'
 import type {
   ActivityStatus,
+  AiMessage,
+  AiSessionInput,
   CodexDiscovery,
   CodexSyncResult,
   ContentStrategy,
@@ -26,7 +31,7 @@ export const READ_ONLY_CODEX_METHODS = new Set([
 
 export interface CodexRpcTransport {
   readonly generation?: number
-  request<T>(method: string, params?: unknown): Promise<T>
+  request<T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T>
   notify(method: string, params?: unknown): void
   close(): Promise<void>
 }
@@ -35,6 +40,7 @@ interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (reason: Error) => void
   timer: ReturnType<typeof setTimeout>
+  abortCleanup?: () => void
 }
 
 interface JsonRpcResponse {
@@ -117,6 +123,7 @@ export class StdioCodexTransport implements CodexRpcTransport {
       if (!pending) continue
       this.pending.delete(message.id)
       clearTimeout(pending.timer)
+      pending.abortCleanup?.()
       if (message.error) {
         pending.reject(new Error(message.error.message ?? `Codex RPC ${message.error.code}`))
       } else {
@@ -128,20 +135,28 @@ export class StdioCodexTransport implements CodexRpcTransport {
   private rejectAll(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
+      pending.abortCleanup?.()
       pending.reject(error)
     }
     this.pending.clear()
   }
 
-  request<T>(method: string, params?: unknown): Promise<T> {
+  request<T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> {
     if (!READ_ONLY_CODEX_METHODS.has(method) || method === 'initialized') {
       return Promise.reject(new Error(`Codex method is not on the read-only allowlist: ${method}`))
     }
     const id = this.nextId++
     const child = this.ensureProcess()
     return new Promise<T>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('The operation was aborted.', 'AbortError'))
+        return
+      }
       const timer = setTimeout(() => {
-        if (!this.pending.delete(id)) return
+        const pending = this.pending.get(id)
+        if (!pending) return
+        this.pending.delete(id)
+        pending.abortCleanup?.()
         reject(new Error(`Codex ${method} 在 ${this.requestTimeoutMs / 1_000} 秒内没有响应。`))
         if (this.process === child) {
           this.process = undefined
@@ -149,14 +164,27 @@ export class StdioCodexTransport implements CodexRpcTransport {
           if (child.exitCode === null) child.kill('SIGTERM')
         }
       }, this.requestTimeoutMs)
+      const abort = () => {
+        const pending = this.pending.get(id)
+        if (!pending) return
+        this.pending.delete(id)
+        clearTimeout(pending.timer)
+        reject(new DOMException('The operation was aborted.', 'AbortError'))
+      }
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
-        timer
+        timer,
+        abortCleanup: signal
+          ? () => signal.removeEventListener('abort', abort)
+          : undefined
       })
+      if (signal) signal.addEventListener('abort', abort, { once: true })
       child.stdin.write(`${JSON.stringify({ method, id, params })}\n`, (error) => {
         if (!error) return
+        const pending = this.pending.get(id)
         this.pending.delete(id)
+        pending?.abortCleanup?.()
         clearTimeout(timer)
         reject(error)
       })
@@ -188,6 +216,7 @@ interface CodexThreadStatus {
 interface CodexThreadItem {
   type: string
   text?: string
+  phase?: string
   content?: Array<{ type: string; text?: string }>
 }
 
@@ -201,7 +230,11 @@ interface CodexThread {
   cliVersion: string
   gitInfo: { sha?: string | null; branch?: string | null } | null
   name?: string | null
-  turns: Array<{ items: CodexThreadItem[] }>
+  turns: CodexTurn[]
+}
+
+interface CodexTurn {
+  items: CodexThreadItem[]
 }
 
 interface ThreadListResponse {
@@ -222,6 +255,7 @@ interface AdapterOptions {
   now?: () => Date
   pageSize?: number
   activitySource?: CodexActivitySource
+  codexSessionsRoot?: string
 }
 
 interface TypeSuggestion {
@@ -342,6 +376,212 @@ function extractLocalText(thread: CodexThread): string {
   return text.join('\n').slice(0, 1_000)
 }
 
+const MAX_AI_MESSAGE_CHARS = 4_000
+const MAX_AI_TOTAL_CHARS = 24_000
+const AI_TAIL_MESSAGE_COUNT = 6
+
+export function redactAiText(value: string): string {
+  return value
+    .replace(/```[\s\S]*?```/g, '[CODE REMOVED]')
+    .replace(
+      /(?:^|\n)(?:diff --git\b[\s\S]*?)(?=\n(?![-+ @]|index\b|new file mode\b|deleted file mode\b)|$)/g,
+      '\n[DIFF REMOVED]'
+    )
+    .replace(/(?:^|\n)(?:--- |\+\+\+ |@@ |[-+](?![-+]))[^\n]*(?:\n|$)/g, '\n[DIFF REMOVED]\n')
+    .replace(
+      /(^|\n)\s*(?:tool(?: call| result| output)?|terminal|mcp|computer output)\s*[:：][^\n]*/gi,
+      '$1[TOOL OUTPUT REMOVED]'
+    )
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[A-Z0-9]{12,})\b/g,
+      '[REDACTED_TOKEN]'
+    )
+    .replace(/\bBearer\s+[^\s"'`]+/gi, 'Bearer [REDACTED_TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_TOKEN]')
+    .replace(
+      /\b(api[_-]?key|access[_-]?token|secret|password|passwd|authorization)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s,;]+)/gi,
+      '$1$2[REDACTED_CREDENTIAL]'
+    )
+    .replace(/\/Users\/[^/\s]+(?:\/[^\s"'`),;]+)*/g, '[REDACTED_PATH]')
+    .replace(/\/home\/[^/\s]+(?:\/[^\s"'`),;]+)*/g, '[REDACTED_PATH]')
+    .replace(/[A-Za-z]:\\Users\\[^\\\s]+(?:\\[^\s"'`),;]+)*/g, '[REDACTED_PATH]')
+    .trim()
+}
+
+function boundedAiMessages(thread: CodexThread): {
+  messages: AiMessage[]
+  truncated: boolean
+} {
+  const candidates: Array<Omit<AiMessage, 'ref'>> = []
+  let truncated = false
+  for (const turn of thread.turns) {
+    for (const item of turn.items) {
+      let role: AiMessage['role'] | undefined
+      let raw = ''
+      if (item.type === 'userMessage') {
+        role = 'user'
+        raw = (item.content ?? [])
+          .filter((content) => content.type === 'text')
+          .map((content) => content.text ?? '')
+          .join('\n')
+      } else if (
+        item.type === 'agentMessage' &&
+        (item.phase === undefined || item.phase === 'final_answer')
+      ) {
+        role = 'assistant'
+        raw = item.text ?? ''
+      }
+      if (!role || !raw.trim()) continue
+      const sanitized = redactAiText(raw)
+      if (!sanitized) continue
+      if (sanitized.length > MAX_AI_MESSAGE_CHARS) truncated = true
+      candidates.push({ role, text: sanitized.slice(0, MAX_AI_MESSAGE_CHARS) })
+    }
+  }
+  if (candidates.length > AI_TAIL_MESSAGE_COUNT) truncated = true
+  const messages = candidates.slice(-AI_TAIL_MESSAGE_COUNT).map((message, index) => ({
+    ref: `message-${index + 1}`,
+    ...message
+  }))
+
+  const total = messages.reduce((sum, message) => sum + message.text.length, 0)
+  if (total <= MAX_AI_TOTAL_CHARS) return { messages, truncated }
+  truncated = true
+  const selected: AiMessage[] = []
+  let used = 0
+  for (const message of [...messages].reverse()) {
+    if (used + message.text.length > MAX_AI_TOTAL_CHARS) continue
+    selected.push(message)
+    used += message.text.length
+  }
+  return { messages: selected.reverse(), truncated }
+}
+
+export function aiSessionContentHash(messages: AiMessage[]): string {
+  return createHash('sha256').update(JSON.stringify(messages)).digest('hex')
+}
+
+function sessionFingerprint(session: SessionRecord): string {
+  return createHash('sha256')
+    .update([
+      session.providerSessionId,
+      session.cwd,
+      session.updatedAt,
+      session.sourceVersion ?? ''
+    ].join('\0'))
+    .digest('hex')
+}
+
+async function readJsonlTailForAi(
+  filePath: string,
+  session: SessionRecord,
+  allowedPaths: Set<string>,
+  resolvePath: (path: string) => Promise<string>,
+  sessionsRootPath: string,
+  signal?: AbortSignal
+): Promise<AiSessionInput> {
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError')
+  }
+  const sessionsRoot = await resolvePath(sessionsRootPath)
+  const canonicalFile = await resolvePath(filePath)
+  const relativePath = relative(sessionsRoot, canonicalFile)
+  if (
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    basename(canonicalFile) !== basename(filePath) ||
+    !basename(canonicalFile).endsWith(`${session.providerSessionId}.jsonl`)
+  ) {
+    throw new Error('Session JSONL 不在 Codex 历史目录内。')
+  }
+
+  const handle = await open(canonicalFile, 'r')
+  try {
+    const stats = await handle.stat()
+    const headerLength = Math.min(stats.size, 64 * 1024)
+    const headerBuffer = Buffer.alloc(headerLength)
+    await handle.read(headerBuffer, 0, headerLength, 0)
+    const firstLine = headerBuffer.toString('utf8').split('\n', 1)[0]
+    if (!firstLine) throw new Error('Session JSONL 为空。')
+    const metadata = JSON.parse(firstLine) as {
+      type?: string
+      payload?: { id?: string; session_id?: string; cwd?: string }
+    }
+    const metadataId = metadata.payload?.id ?? metadata.payload?.session_id
+    if (metadata.type !== 'session_meta' || metadataId !== session.providerSessionId) {
+      throw new Error('Session JSONL 元数据与目标 Session 不一致。')
+    }
+    if (typeof metadata.payload?.cwd !== 'string') {
+      throw new Error('Session JSONL 缺少工作目录。')
+    }
+    const metadataCwd = await resolvePath(metadata.payload.cwd)
+    if (metadataCwd !== session.cwd || !allowedPaths.has(metadataCwd)) {
+      throw new Error('Session JSONL 已移出项目授权范围。')
+    }
+
+    const maximumTailBytes = 2 * 1024 * 1024
+    const tailStart = Math.max(0, stats.size - maximumTailBytes)
+    const tailBuffer = Buffer.alloc(stats.size - tailStart)
+    await handle.read(tailBuffer, 0, tailBuffer.length, tailStart)
+    if (signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
+    let tail = tailBuffer.toString('utf8')
+    if (tailStart > 0) tail = tail.slice(Math.max(0, tail.indexOf('\n') + 1))
+
+    const candidates: Array<Omit<AiMessage, 'ref'>> = []
+    for (const line of tail.split('\n')) {
+      if (!line.trim()) continue
+      let entry: {
+        type?: string
+        payload?: {
+          type?: string
+          role?: string
+          phase?: string
+          content?: Array<{ type?: string; text?: string }>
+        }
+      }
+      try {
+        entry = JSON.parse(line) as typeof entry
+      } catch {
+        continue
+      }
+      const payload = entry.payload
+      if (
+        entry.type !== 'response_item' ||
+        payload?.type !== 'message' ||
+        (payload.role !== 'user' && payload.role !== 'assistant') ||
+        (payload.role === 'assistant' &&
+          payload.phase !== undefined &&
+          payload.phase !== 'final_answer')
+      ) {
+        continue
+      }
+      const text = redactAiText(
+        (payload.content ?? [])
+          .filter((part) => part.type === 'input_text' || part.type === 'output_text')
+          .map((part) => part.text ?? '')
+          .join('\n')
+      ).slice(0, MAX_AI_MESSAGE_CHARS)
+      if (text) candidates.push({ role: payload.role, text })
+    }
+    const messages = candidates.slice(-AI_TAIL_MESSAGE_COUNT).map((message, index) => ({
+      ref: `message-${index + 1}`,
+      ...message
+    }))
+    return {
+      sessionId: session.id,
+      sessionFingerprint: sessionFingerprint(session),
+      evidenceFingerprint: '',
+      contentHash: aiSessionContentHash(messages),
+      truncated: tailStart > 0 || candidates.length > messages.length,
+      messages
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
 function hasFileChanges(thread: CodexThread): boolean {
   return thread.turns.some((turn) =>
     turn.items.some((item) => item.type === 'fileChange')
@@ -356,6 +596,7 @@ export class CodexAdapter {
   private readonly now: () => Date
   private readonly pageSize: number
   private readonly activitySource: CodexActivitySource
+  private readonly codexSessionsRoot: string
 
   constructor(
     private readonly transport: CodexRpcTransport = new StdioCodexTransport(),
@@ -364,11 +605,13 @@ export class CodexAdapter {
     this.resolvePath = options.resolvePath ?? realpath
     this.now = options.now ?? (() => new Date())
     this.pageSize = options.pageSize ?? 100
+    this.codexSessionsRoot =
+      options.codexSessionsRoot ?? join(homedir(), '.codex', 'sessions')
     this.activitySource =
       options.activitySource ?? new CodexLogActivitySource(undefined, this.now)
   }
 
-  private async initialize(): Promise<CodexDiscovery['compatibility']> {
+  private async initialize(signal?: AbortSignal): Promise<CodexDiscovery['compatibility']> {
     if (
       this.initialized &&
       this.compatibility &&
@@ -383,7 +626,7 @@ export class CodexAdapter {
         requestAttestation: false,
         optOutNotificationMethods: []
       }
-    })
+    }, signal)
     this.transport.notify('initialized')
     this.initialized = true
     this.initializedGeneration = this.transport.generation
@@ -682,6 +925,80 @@ export class CodexAdapter {
         ? compatibility
         : { ...compatibility, status: 'degraded', message: '部分 Codex 数据无法读取。' },
       failures
+    }
+  }
+
+  async readSessionForAi(
+    session: SessionRecord,
+    scope: ProjectScope,
+    signal?: AbortSignal
+  ): Promise<AiSessionInput> {
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+    await this.initialize(signal)
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+    const allowedPaths = new Set(await this.canonicalIncludedPaths(scope))
+    if (!allowedPaths.has(session.cwd)) {
+      throw new Error('Session 已不在本次项目授权范围内。')
+    }
+    let response: ThreadReadResponse
+    try {
+      response = await this.transport.request<ThreadReadResponse>(
+        'thread/read',
+        { threadId: session.providerSessionId, includeTurns: true },
+        signal
+      )
+    } catch (error) {
+      if (signal?.aborted) throw error
+      const message = error instanceof Error ? error.message : ''
+      const pathMatches = [
+        ...message.matchAll(/failed to read thread (\/.*?\.jsonl)(?::|$)/g)
+      ]
+      const fallbackPath = pathMatches.at(-1)?.[1]
+      if (!fallbackPath) throw error
+      try {
+        return await readJsonlTailForAi(
+          fallbackPath,
+          session,
+          allowedPaths,
+          this.resolvePath,
+          this.codexSessionsRoot,
+          signal
+        )
+      } catch (fallbackError) {
+        if (
+          fallbackError instanceof DOMException &&
+          fallbackError.name === 'AbortError'
+        ) {
+          throw fallbackError
+        }
+        throw new Error('Codex App Server 与本机 JSONL 均无法读取会话结尾。')
+      }
+    }
+    if (signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
+    const thread = response.thread
+    if (thread.id !== session.providerSessionId) {
+      throw new Error('Thread 详情 ID 与 Session 不一致。')
+    }
+    const cwd = await this.resolvePath(thread.cwd)
+    if (cwd !== session.cwd || !allowedPaths.has(cwd)) {
+      throw new Error('Thread 工作目录已变化或移出项目范围。')
+    }
+    if (session.sourceVersion && thread.cliVersion !== session.sourceVersion) {
+      throw new Error('Session 版本已变化。')
+    }
+    if (isoFromUnixSeconds(thread.updatedAt) !== session.updatedAt) {
+      throw new Error('Session 在扫描冻结后发生变化。')
+    }
+    const extracted = boundedAiMessages({ ...thread, cwd })
+    return {
+      sessionId: session.id,
+      sessionFingerprint: sessionFingerprint(session),
+      evidenceFingerprint: '',
+      contentHash: aiSessionContentHash(extracted.messages),
+      truncated: extracted.truncated,
+      messages: extracted.messages
     }
   }
 

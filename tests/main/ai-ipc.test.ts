@@ -4,6 +4,7 @@ import type { AiConfigStore } from '../../src/main/ai-config-store.js'
 import type { AiProviderClient } from '../../src/main/ai-provider.js'
 import type { GitAdapter } from '../../src/main/git-adapter.js'
 import type { ProjectService } from '../../src/main/project-service.js'
+import type { ProjectAiScanService } from '../../src/main/project-ai-scan-service.js'
 import { IPC_CHANNELS } from '../../src/shared/ipc.js'
 
 const electronMocks = vi.hoisted(() => ({
@@ -61,6 +62,37 @@ describe('AI IPC handlers', () => {
       latencyMs: 12,
     })),
   }
+  const idleScan = {
+    status: 'idle' as const,
+    total: 0,
+    succeeded: 0,
+    reused: 0,
+    failed: 0,
+    stale: 0,
+    unknown: 0,
+    pending: 0,
+    items: [],
+    interpretations: {},
+  }
+  const aiScan = {
+    prepare: vi.fn(async (projectId: string) => ({
+      id: 'preparation-1',
+      projectId,
+      projectName: 'SeePal',
+      sessionCount: 1,
+      cachedCount: 0,
+      requestCount: 1,
+      providerHost: 'api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      hasApiKey: true,
+      expiresAt: '2026-07-30T12:00:00.000Z',
+    })),
+    start: vi.fn(async () => idleScan),
+    status: vi.fn(() => idleScan),
+    cancel: vi.fn(() => idleScan),
+    resume: vi.fn(() => idleScan),
+    retryFailures: vi.fn(() => idleScan),
+  }
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -70,6 +102,7 @@ describe('AI IPC handlers', () => {
       git: {} as GitAdapter,
       aiConfig: aiConfig as unknown as AiConfigStore,
       aiProvider: aiProvider as unknown as AiProviderClient,
+      aiScan: aiScan as unknown as ProjectAiScanService,
       allowedRendererUrl,
     })
   })
@@ -113,5 +146,30 @@ describe('AI IPC handlers', () => {
       ok: false,
       message: '无法连接模型服务，请检查 Base URL 和网络。',
     })
+  })
+
+  it('exposes the explicit prepare/start/status/cancel/resume/retry scan contract', async () => {
+    const event = trustedEvent(allowedRendererUrl)
+    await electronMocks.handlers.get(IPC_CHANNELS.prepareAiScan)!(event, 'project-1')
+    await electronMocks.handlers.get(IPC_CHANNELS.startAiScan)!(event, {
+      preparationId: 'preparation-1',
+      localReadConfirmed: true,
+      remoteSendConfirmed: true,
+    })
+    await electronMocks.handlers.get(IPC_CHANNELS.getAiScanStatus)!(event, 'project-1')
+    await electronMocks.handlers.get(IPC_CHANNELS.cancelAiScan)!(event, 'project-1')
+    await electronMocks.handlers.get(IPC_CHANNELS.resumeAiScan)!(event, 'project-1')
+    await electronMocks.handlers.get(IPC_CHANNELS.retryAiScanFailures)!(event, 'project-1')
+
+    expect(aiScan.prepare).toHaveBeenCalledWith('project-1')
+    expect(aiScan.start).toHaveBeenCalledWith({
+      preparationId: 'preparation-1',
+      localReadConfirmed: true,
+      remoteSendConfirmed: true,
+    })
+    expect(aiScan.status).toHaveBeenCalledWith('project-1')
+    expect(aiScan.cancel).toHaveBeenCalledWith('project-1')
+    expect(aiScan.resume).toHaveBeenCalledWith('project-1')
+    expect(aiScan.retryFailures).toHaveBeenCalledWith('project-1')
   })
 })

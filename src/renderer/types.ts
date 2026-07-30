@@ -6,6 +6,8 @@ import {
   type AiConfigInput as AiConfigInputDto,
   type AiConnectionTestResultDto,
   type AiProtocol,
+  type AiScanPreparationDto,
+  type AiScanStatusDto,
   type ContentPolicy,
   type DeleteResultDto,
   type EvidenceAxisDto,
@@ -63,6 +65,8 @@ export type DeleteResult = DeleteResultDto
 export type AiConfig = AiConfigDto
 export type AiConfigInput = AiConfigInputDto
 export type AiConnectionTestResult = AiConnectionTestResultDto
+export type AiScanPreparation = AiScanPreparationDto
+export type AiScanStatus = AiScanStatusDto
 
 export type AddProjectInput = Parameters<SeePalApi['addProject']>[0]
 

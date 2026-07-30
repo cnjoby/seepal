@@ -35,6 +35,12 @@ const fallbackApi: SeePalApi = {
   saveAiConfig: (_input: AiConfigInput) => unavailable<AiConfig>(),
   clearAiApiKey: () => unavailable<AiConfig>(),
   testAiConnection: () => unavailable<AiConnectionTestResult>(),
+  prepareAiScan: () => unavailable(),
+  startAiScan: () => unavailable(),
+  getAiScanStatus: () => unavailable(),
+  cancelAiScan: () => unavailable(),
+  resumeAiScan: () => unavailable(),
+  retryAiScanFailures: () => unavailable(),
 }
 
 export const api: SeePalApi =

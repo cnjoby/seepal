@@ -3,6 +3,10 @@ import { dirname } from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
 import {
+  type AiInterpretation,
+  type AiScanItem,
+  type AiScanItemStatus,
+  type AiScanRun,
   type CoverageWindow,
   type DeleteProjectResult,
   type Evidence,
@@ -51,6 +55,51 @@ interface ProjectRow {
   sync_status: Project['syncStatus']
   coverage_json: string | null
   sync_message: string | null
+}
+
+interface AiScanRunRow {
+  id: string
+  project_id: string
+  status: AiScanRun['status']
+  provider_fingerprint: string
+  total: number
+  succeeded: number
+  reused: number
+  failed: number
+  stale: number
+  unknown_count: number
+  pending: number
+  started_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+interface AiScanItemRow {
+  id: string
+  run_id: string
+  project_id: string
+  session_id: string
+  source_fingerprint: string
+  fingerprint: string
+  status: AiScanItemStatus
+  attempt_count: number
+  error: string | null
+  updated_at: string
+}
+
+interface AiInterpretationRow {
+  id: string
+  project_id: string
+  session_id: string
+  fingerprint: string
+  assessment: AiInterpretation['assessment']
+  next_actor: AiInterpretation['nextActor']
+  goal: string
+  outcome: string
+  gaps_json: string
+  next_action: string | null
+  evidence_refs_json: string
+  created_at: string
 }
 
 function optionalJson<T>(value: string | null | undefined): T | undefined {
@@ -196,7 +245,68 @@ export class SeePalDatabase {
         coverage_json TEXT,
         failures_json TEXT NOT NULL
       ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS ai_scan_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        provider_fingerprint TEXT NOT NULL,
+        total INTEGER NOT NULL,
+        succeeded INTEGER NOT NULL DEFAULT 0,
+        reused INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        stale INTEGER NOT NULL DEFAULT 0,
+        unknown_count INTEGER NOT NULL DEFAULT 0,
+        pending INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS ai_scan_runs_by_project
+        ON ai_scan_runs(project_id, started_at DESC);
+
+      CREATE TABLE IF NOT EXISTS ai_scan_items (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES ai_scan_runs(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        source_fingerprint TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(run_id, session_id)
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS ai_interpretations (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        fingerprint TEXT NOT NULL,
+        assessment TEXT NOT NULL,
+        next_actor TEXT NOT NULL DEFAULT 'unknown',
+        goal TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        gaps_json TEXT NOT NULL,
+        next_action TEXT,
+        evidence_refs_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(project_id, session_id, fingerprint)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS ai_interpretations_by_session
+        ON ai_interpretations(project_id, session_id, created_at DESC);
     `)
+    const interpretationColumns = this.connection
+      .prepare('PRAGMA table_info(ai_interpretations)')
+      .all() as Array<{ name: string }>
+    if (!interpretationColumns.some((column) => column.name === 'next_actor')) {
+      this.connection.exec(
+        "ALTER TABLE ai_interpretations ADD COLUMN next_actor TEXT NOT NULL DEFAULT 'unknown'"
+      )
+    }
   }
 
   close(): void {
@@ -493,6 +603,359 @@ export class SeePalDatabase {
         coverage ? JSON.stringify(coverage) : null,
         JSON.stringify(failures)
       )
+  }
+
+  createAiScanRun(run: AiScanRun, items: AiScanItem[]): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      this.connection.prepare(
+        `INSERT INTO ai_scan_runs (
+          id, project_id, status, provider_fingerprint, total, succeeded, reused,
+          failed, stale, unknown_count, pending, started_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        run.id, run.projectId, run.status, run.providerFingerprint, run.total,
+        run.succeeded, run.reused, run.failed, run.stale, run.unknown, run.pending,
+        run.startedAt, run.updatedAt, run.completedAt ?? null
+      )
+      const statement = this.connection.prepare(
+        `INSERT INTO ai_scan_items (
+          id, run_id, project_id, session_id, source_fingerprint, fingerprint, status,
+          attempt_count, error, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const item of items) {
+        statement.run(
+          item.id, item.runId, item.projectId, item.sessionId, item.sourceFingerprint, item.fingerprint,
+          item.status, item.attemptCount, item.error ?? null, item.updatedAt
+        )
+      }
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  private aiRunFromRow(row: AiScanRunRow): AiScanRun {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      status: row.status,
+      providerFingerprint: row.provider_fingerprint,
+      total: row.total,
+      succeeded: row.succeeded,
+      reused: row.reused,
+      failed: row.failed,
+      stale: row.stale,
+      unknown: row.unknown_count,
+      pending: row.pending,
+      startedAt: row.started_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at ?? undefined
+    }
+  }
+
+  private aiItemFromRow(row: AiScanItemRow): AiScanItem {
+    return {
+      id: row.id,
+      runId: row.run_id,
+      projectId: row.project_id,
+      sessionId: row.session_id,
+      sourceFingerprint: row.source_fingerprint,
+      fingerprint: row.fingerprint,
+      status: row.status,
+      attemptCount: row.attempt_count,
+      error: row.error ?? undefined,
+      updatedAt: row.updated_at
+    }
+  }
+
+  private interpretationFromRow(row: AiInterpretationRow): AiInterpretation {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      sessionId: row.session_id,
+      fingerprint: row.fingerprint,
+      assessment: row.assessment,
+      nextActor: row.next_actor,
+      goal: row.goal,
+      outcome: row.outcome,
+      gaps: JSON.parse(row.gaps_json) as string[],
+      nextAction: row.next_action ?? undefined,
+      evidenceRefs: JSON.parse(row.evidence_refs_json) as string[],
+      createdAt: row.created_at
+    }
+  }
+
+  getLatestAiScanRun(projectId: string): AiScanRun | undefined {
+    const row = this.connection.prepare(
+      'SELECT * FROM ai_scan_runs WHERE project_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1'
+    ).get(projectId) as unknown as AiScanRunRow | undefined
+    return row ? this.aiRunFromRow(row) : undefined
+  }
+
+  getAiScanRun(runId: string): AiScanRun | undefined {
+    const row = this.connection.prepare(
+      'SELECT * FROM ai_scan_runs WHERE id = ?'
+    ).get(runId) as unknown as AiScanRunRow | undefined
+    return row ? this.aiRunFromRow(row) : undefined
+  }
+
+  listAiScanItems(runId: string): AiScanItem[] {
+    const rows = this.connection.prepare(
+      'SELECT * FROM ai_scan_items WHERE run_id = ? ORDER BY rowid ASC'
+    ).all(runId) as unknown as AiScanItemRow[]
+    return rows.map((row) => this.aiItemFromRow(row))
+  }
+
+  getAiInterpretation(
+    projectId: string,
+    sessionId: string,
+    fingerprint: string
+  ): AiInterpretation | undefined {
+    const row = this.connection.prepare(
+      `SELECT * FROM ai_interpretations
+       WHERE project_id = ? AND session_id = ? AND fingerprint = ?`
+    ).get(projectId, sessionId, fingerprint) as unknown as AiInterpretationRow | undefined
+    return row ? this.interpretationFromRow(row) : undefined
+  }
+
+  getReusableAiInterpretation(
+    projectId: string,
+    sessionId: string,
+    sourceFingerprint: string,
+    providerFingerprint: string
+  ): AiInterpretation | undefined {
+    const row = this.connection.prepare(
+      `SELECT interpretation.*
+       FROM ai_scan_items item
+       JOIN ai_scan_runs run ON run.id = item.run_id
+       JOIN ai_interpretations interpretation
+         ON interpretation.project_id = item.project_id
+        AND interpretation.session_id = item.session_id
+        AND interpretation.fingerprint = item.fingerprint
+       WHERE item.project_id = ? AND item.session_id = ?
+         AND item.source_fingerprint = ?
+         AND run.provider_fingerprint = ?
+         AND item.status IN ('succeeded', 'reused')
+       ORDER BY run.started_at DESC LIMIT 1`
+    ).get(
+      projectId, sessionId, sourceFingerprint, providerFingerprint
+    ) as unknown as AiInterpretationRow | undefined
+    return row ? this.interpretationFromRow(row) : undefined
+  }
+
+  listAiInterpretationsForRun(runId: string): AiInterpretation[] {
+    const rows = this.connection.prepare(
+      `SELECT interpretation.*
+       FROM ai_scan_items item
+       JOIN ai_interpretations interpretation
+         ON interpretation.project_id = item.project_id
+        AND interpretation.session_id = item.session_id
+        AND interpretation.fingerprint = item.fingerprint
+       WHERE item.run_id = ? AND item.status IN ('succeeded', 'reused')
+       ORDER BY item.rowid ASC`
+    ).all(runId) as unknown as AiInterpretationRow[]
+    return rows.map((row) => this.interpretationFromRow(row))
+  }
+
+  updateAiScanItem(
+    runId: string,
+    sessionId: string,
+    status: AiScanItemStatus,
+    updatedAt: string,
+    error?: string,
+    incrementAttempt = false
+  ): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      this.connection.prepare(
+        `UPDATE ai_scan_items
+         SET status = ?, error = ?, updated_at = ?,
+             attempt_count = attempt_count + ?
+         WHERE run_id = ? AND session_id = ?`
+      ).run(status, error ?? null, updatedAt, incrementAttempt ? 1 : 0, runId, sessionId)
+      this.recountAiScanRun(runId, updatedAt)
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  updateAiScanItemFingerprint(
+    runId: string,
+    sessionId: string,
+    fingerprint: string,
+    updatedAt: string
+  ): void {
+    this.connection.prepare(
+      `UPDATE ai_scan_items SET fingerprint = ?, updated_at = ?
+       WHERE run_id = ? AND session_id = ? AND status = 'pending'`
+    ).run(fingerprint, updatedAt, runId, sessionId)
+  }
+
+  commitAiScanReuse(
+    interpretation: AiInterpretation,
+    runId: string,
+    updatedAt: string
+  ): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      const updated = this.connection.prepare(
+        `UPDATE ai_scan_items
+         SET fingerprint = ?, status = 'reused', error = NULL, updated_at = ?
+         WHERE run_id = ? AND session_id = ? AND status = 'pending'`
+      ).run(
+        interpretation.fingerprint,
+        updatedAt,
+        runId,
+        interpretation.sessionId
+      )
+      if (updated.changes !== 1) {
+        throw new Error('AI scan item is no longer pending')
+      }
+      this.recountAiScanRun(runId, updatedAt)
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  commitAiScanSuccess(
+    interpretation: AiInterpretation,
+    runId: string,
+    status: 'succeeded' | 'reused',
+    updatedAt: string
+  ): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      const updated = this.connection.prepare(
+        `UPDATE ai_scan_items
+         SET status = ?, error = NULL, updated_at = ?
+         WHERE run_id = ? AND session_id = ? AND fingerprint = ?
+           AND status = 'processing'`
+      ).run(
+        status, updatedAt, runId, interpretation.sessionId, interpretation.fingerprint
+      )
+      if (updated.changes !== 1) {
+        throw new Error('AI scan item is no longer processing')
+      }
+      if (status === 'succeeded') {
+        this.connection.prepare(
+          `INSERT INTO ai_interpretations (
+            id, project_id, session_id, fingerprint, assessment, next_actor, goal, outcome,
+            gaps_json, next_action, evidence_refs_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(project_id, session_id, fingerprint) DO NOTHING`
+        ).run(
+          interpretation.id, interpretation.projectId, interpretation.sessionId,
+          interpretation.fingerprint, interpretation.assessment, interpretation.nextActor,
+          interpretation.goal,
+          interpretation.outcome, JSON.stringify(interpretation.gaps),
+          interpretation.nextAction ?? null, JSON.stringify(interpretation.evidenceRefs),
+          interpretation.createdAt
+        )
+      }
+      this.recountAiScanRun(runId, updatedAt)
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  private recountAiScanRun(runId: string, updatedAt: string): void {
+    const counts = this.connection.prepare(
+      `SELECT
+        count(*) AS total,
+        sum(status = 'succeeded') AS succeeded,
+        sum(status = 'reused') AS reused,
+        sum(status = 'failed') AS failed,
+        sum(status = 'stale') AS stale,
+        sum(status = 'unknown') AS unknown_count,
+        sum(status IN ('pending', 'processing')) AS pending
+       FROM ai_scan_items WHERE run_id = ?`
+    ).get(runId) as Record<string, number>
+    const terminal = Number(counts.pending) === 0
+    const status: AiScanRun['status'] = terminal
+      ? Number(counts.failed) + Number(counts.stale) + Number(counts.unknown_count) === 0
+        ? 'completed'
+        : 'partial'
+      : 'running'
+    this.connection.prepare(
+      `UPDATE ai_scan_runs SET
+        status = ?, total = ?, succeeded = ?, reused = ?, failed = ?, stale = ?,
+        unknown_count = ?, pending = ?, updated_at = ?, completed_at = ?
+       WHERE id = ?`
+    ).run(
+      status, Number(counts.total), Number(counts.succeeded), Number(counts.reused),
+      Number(counts.failed), Number(counts.stale), Number(counts.unknown_count),
+      Number(counts.pending), updatedAt, terminal ? updatedAt : null, runId
+    )
+  }
+
+  cancelAiScanRun(runId: string, updatedAt: string): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      this.connection.prepare(
+        `UPDATE ai_scan_items SET status = 'unknown', error = '请求已取消，结果未知。',
+          updated_at = ? WHERE run_id = ? AND status = 'processing'`
+      ).run(updatedAt, runId)
+      this.recountAiScanRun(runId, updatedAt)
+      this.connection.prepare(
+        `UPDATE ai_scan_runs SET status = 'canceled', updated_at = ? WHERE id = ?`
+      ).run(updatedAt, runId)
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  resumeAiScanRun(
+    runId: string,
+    updatedAt: string,
+    includeFailures = false
+  ): void {
+    this.connection.exec('BEGIN IMMEDIATE')
+    try {
+      if (includeFailures) {
+        this.connection.prepare(
+          `UPDATE ai_scan_items SET status = 'pending', error = NULL, updated_at = ?
+           WHERE run_id = ? AND status = 'failed'`
+        ).run(updatedAt, runId)
+      }
+      this.recountAiScanRun(runId, updatedAt)
+      this.connection.prepare(
+        `UPDATE ai_scan_runs SET status = 'running', completed_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).run(updatedAt, runId)
+      this.connection.exec('COMMIT')
+    } catch (error) {
+      this.connection.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  setAiScanRunStatus(
+    runId: string,
+    status: AiScanRun['status'],
+    updatedAt: string
+  ): void {
+    this.connection.prepare(
+      `UPDATE ai_scan_runs SET status = ?, updated_at = ? WHERE id = ?`
+    ).run(status, updatedAt, runId)
+  }
+
+  markInterruptedAiScansUnknown(updatedAt: string): number {
+    const runs = this.connection.prepare(
+      `SELECT id FROM ai_scan_runs WHERE status IN ('running', 'paused')`
+    ).all() as Array<{ id: string }>
+    for (const run of runs) this.cancelAiScanRun(run.id, updatedAt)
+    return runs.length
   }
 
   deleteProject(projectId: string): DeleteProjectResult {

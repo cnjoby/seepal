@@ -23,6 +23,12 @@ const { mockApi } = vi.hoisted(() => ({
     saveAiConfig: vi.fn(),
     clearAiApiKey: vi.fn(),
     testAiConnection: vi.fn(),
+    prepareAiScan: vi.fn(),
+    startAiScan: vi.fn(),
+    getAiScanStatus: vi.fn(),
+    cancelAiScan: vi.fn(),
+    resumeAiScan: vi.fn(),
+    retryAiScanFailures: vi.fn(),
   },
 }))
 
@@ -177,6 +183,30 @@ function resetApi() {
     message: '连接成功。',
     model: 'deepseek-v4-flash',
     latencyMs: 42,
+  })
+  mockApi.prepareAiScan.mockResolvedValue({
+    id: 'preparation-1',
+    projectId: project.id,
+    projectName: project.name,
+    sessionCount: 2,
+    cachedCount: 0,
+    requestCount: 2,
+    providerHost: 'api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    hasApiKey: true,
+    expiresAt: '2026-07-30T12:00:00.000Z',
+  })
+  mockApi.getAiScanStatus.mockResolvedValue({
+    status: 'idle',
+    total: 0,
+    succeeded: 0,
+    reused: 0,
+    failed: 0,
+    stale: 0,
+    unknown: 0,
+    pending: 0,
+    items: [],
+    interpretations: {},
   })
 }
 
@@ -421,6 +451,79 @@ describe('Epic 1 Project Console', () => {
     expect(
       within(dialog).getByText('已清空尚未保存的 API Key。'),
     ).toBeInTheDocument()
+  })
+
+  it('shows AI assessment labels in the row and drawer', async () => {
+    const user = userEvent.setup()
+    mockApi.getProjectDashboard.mockResolvedValue({
+      ...dashboard,
+      sessions: [{
+        ...bugSession,
+        ai: {
+          assessment: 'needs-action',
+          nextActor: 'user',
+          goal: '修复菜单栏状态',
+          outcome: '已完成代码修改',
+          gaps: ['缺少人工 Review'],
+          nextAction: '检查改动',
+          evidenceRefs: ['message-1'],
+        },
+      }],
+    })
+    render(<App />)
+
+    expect(await screen.findByText('AI 推断 · 需要你处理')).toBeInTheDocument()
+    await user.click(screen.getByText('修复菜单栏状态丢失'))
+    const drawer = screen.getByRole('complementary', {
+      name: '修复菜单栏状态丢失 详情',
+    })
+    expect(within(drawer).getByText('AI 推断')).toBeInTheDocument()
+    expect(within(drawer).getByText('需要你处理')).toBeInTheDocument()
+    expect(within(drawer).getByText('修复菜单栏状态')).toBeInTheDocument()
+    expect(within(drawer).getByText('缺少人工 Review', { exact: false })).toBeInTheDocument()
+  })
+
+  it('drops a late AI preparation after switching projects', async () => {
+    const user = userEvent.setup()
+    const projectTwo = {
+      ...project,
+      id: 'project-2',
+      name: 'Other',
+      path: '/Users/test/Other',
+    }
+    let resolvePreparation!: (value: Awaited<ReturnType<SeePalApi['prepareAiScan']>>) => void
+    mockApi.listProjects.mockResolvedValue([project, projectTwo])
+    mockApi.getProjectDashboard.mockImplementation(async (projectId: string) => ({
+      ...dashboard,
+      project: projectId === project.id ? project : projectTwo,
+    }))
+    mockApi.prepareAiScan.mockImplementation(
+      () => new Promise((resolve) => {
+        resolvePreparation = resolve
+      }),
+    )
+    render(<App />)
+
+    await screen.findByText('修复菜单栏状态丢失')
+    await user.click(screen.getByRole('button', { name: 'AI 解读' }))
+    await user.click(screen.getByRole('button', { name: /Other/ }))
+    resolvePreparation({
+      id: 'late',
+      projectId: project.id,
+      projectName: project.name,
+      sessionCount: 2,
+      cachedCount: 0,
+      requestCount: 2,
+      providerHost: 'api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      hasApiKey: true,
+      expiresAt: '2026-07-30T12:00:00.000Z',
+    })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '项目 Session AI 扫描' }))
+        .not.toBeInTheDocument(),
+    )
   })
 })
 

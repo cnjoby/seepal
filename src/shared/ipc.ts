@@ -11,6 +11,12 @@ export const IPC_CHANNELS = {
   saveAiConfig: 'seepal:save-ai-config',
   clearAiApiKey: 'seepal:clear-ai-api-key',
   testAiConnection: 'seepal:test-ai-connection',
+  prepareAiScan: 'seepal:prepare-ai-scan',
+  startAiScan: 'seepal:start-ai-scan',
+  getAiScanStatus: 'seepal:get-ai-scan-status',
+  cancelAiScan: 'seepal:cancel-ai-scan',
+  resumeAiScan: 'seepal:resume-ai-scan',
+  retryAiScanFailures: 'seepal:retry-ai-scan-failures',
 } as const
 
 export const UI_SESSION_TYPES = [
@@ -110,6 +116,7 @@ export interface SessionViewDto {
   branch?: string
   worktree?: string
   evidence: EvidenceAxisDto[]
+  ai?: AiInterpretationDto
 }
 
 export interface ProjectDashboardDto {
@@ -146,6 +153,53 @@ export interface AiConnectionTestResultDto {
   latencyMs?: number
 }
 
+export type AiAssessmentDto =
+  | 'needs-action'
+  | 'blocked'
+  | 'possibly-complete'
+  | 'unknown'
+
+export interface AiInterpretationDto {
+  assessment: AiAssessmentDto
+  nextActor: 'user' | 'ai' | 'external' | 'none' | 'unknown'
+  goal: string
+  outcome: string
+  gaps: string[]
+  nextAction?: string
+  evidenceRefs: string[]
+}
+
+export interface AiScanPreparationDto {
+  id: string
+  projectId: string
+  projectName: string
+  sessionCount: number
+  cachedCount: number
+  requestCount: number
+  providerHost: string
+  model: string
+  hasApiKey: boolean
+  expiresAt: string
+}
+
+export interface AiScanStatusDto {
+  runId?: string
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'partial' | 'canceled'
+  total: number
+  succeeded: number
+  reused: number
+  failed: number
+  stale: number
+  unknown: number
+  pending: number
+  items: Array<{
+    sessionId: string
+    status: 'pending' | 'processing' | 'succeeded' | 'reused' | 'failed' | 'stale' | 'unknown'
+    error?: string
+  }>
+  interpretations: Record<string, AiInterpretationDto>
+}
+
 export interface SeePalApi {
   listProjects(): Promise<ProjectSummaryDto[]>
   selectDirectory(): Promise<string | null>
@@ -170,4 +224,14 @@ export interface SeePalApi {
   saveAiConfig(input: AiConfigInput): Promise<AiConfigDto>
   clearAiApiKey(): Promise<AiConfigDto>
   testAiConnection(): Promise<AiConnectionTestResultDto>
+  prepareAiScan(projectId: string): Promise<AiScanPreparationDto>
+  startAiScan(input: {
+    preparationId: string
+    localReadConfirmed: boolean
+    remoteSendConfirmed: boolean
+  }): Promise<AiScanStatusDto>
+  getAiScanStatus(projectId: string): Promise<AiScanStatusDto>
+  cancelAiScan(projectId: string): Promise<AiScanStatusDto>
+  resumeAiScan(projectId: string): Promise<AiScanStatusDto>
+  retryAiScanFailures(projectId: string): Promise<AiScanStatusDto>
 }

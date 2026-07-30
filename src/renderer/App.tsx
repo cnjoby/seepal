@@ -11,6 +11,8 @@ import {
   SESSION_TYPE_LABELS,
   SESSION_TYPES,
   type ContentPolicy,
+  type AiScanPreparation,
+  type AiScanStatus,
   type ProjectDashboard,
   type ProjectInspection,
   type ProjectSummary,
@@ -68,6 +70,29 @@ function projectInitial(name: string) {
   return name.trim().slice(0, 1).toUpperCase() || 'S'
 }
 
+function aiAssessmentLabel(
+  assessment: NonNullable<SessionView['ai']>['assessment'],
+) {
+  return {
+    'needs-action': '需要继续',
+    blocked: '受阻',
+    'possibly-complete': '可能完成',
+    unknown: '无法判断',
+  }[assessment]
+}
+
+function aiNextActorLabel(
+  actor: NonNullable<SessionView['ai']>['nextActor'],
+) {
+  return {
+    user: '需要你处理',
+    ai: '可让 AI 继续',
+    external: '等待外部条件',
+    none: '没有已知后续',
+    unknown: '下一步不明确',
+  }[actor]
+}
+
 export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string>()
@@ -78,11 +103,15 @@ export function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
+  const [aiScanPreparation, setAiScanPreparation] = useState<AiScanPreparation>()
+  const [aiScan, setAiScan] = useState<AiScanStatus>()
+  const [aiScanOpen, setAiScanOpen] = useState(false)
   const [groupMode, setGroupMode] = useState<GroupMode>('status')
   const [statusFilter, setStatusFilter] = useState<SessionGroup | 'all'>('all')
   const [typeFilter, setTypeFilter] = useState<SessionType | 'all'>('all')
   const [syncing, setSyncing] = useState(false)
   const dashboardRequestRef = useRef(0)
+  const aiScanRequestRef = useRef(0)
   const selectedProjectIdRef = useRef(selectedProjectId)
   selectedProjectIdRef.current = selectedProjectId
 
@@ -115,6 +144,9 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    setAiScan(undefined)
+    setAiScanPreparation(undefined)
+    setAiScanOpen(false)
     if (!selectedProjectId) {
       setDashboard(undefined)
       return
@@ -141,6 +173,29 @@ export function App() {
       active = false
     }
   }, [selectedProjectId])
+
+  useEffect(() => {
+    if (!selectedProjectId || aiScan?.status !== 'running') return
+    const projectId = selectedProjectId
+    const timer = window.setInterval(() => {
+      const requestId = ++aiScanRequestRef.current
+      void api.getAiScanStatus(projectId).then((status) => {
+        if (
+          selectedProjectIdRef.current !== projectId ||
+          requestId !== aiScanRequestRef.current
+        ) return
+        setAiScan(status)
+        if (status.status !== 'running') {
+          void api.getProjectDashboard(projectId).then((nextDashboard) => {
+            if (selectedProjectIdRef.current === projectId) {
+              setDashboard(nextDashboard)
+            }
+          })
+        }
+      })
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [selectedProjectId, aiScan?.status])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -246,6 +301,40 @@ export function App() {
     setDeleteOpen(false)
   }
 
+  async function handlePrepareAiScan() {
+    if (!selectedProjectId) return
+    if (
+      aiScanPreparation?.projectId === selectedProjectId &&
+      aiScan &&
+      (aiScan.status === 'running' ||
+        aiScan.status === 'paused' ||
+        aiScan.status === 'canceled')
+    ) {
+      setAiScanOpen(true)
+      return
+    }
+    const projectId = selectedProjectId
+    const requestId = ++aiScanRequestRef.current
+    setError(undefined)
+    try {
+      const preparation = await api.prepareAiScan(projectId)
+      if (
+        selectedProjectIdRef.current !== projectId ||
+        requestId !== aiScanRequestRef.current
+      ) return
+      setAiScanPreparation(preparation)
+      setAiScan(undefined)
+      setAiScanOpen(true)
+    } catch (reason) {
+      if (
+        selectedProjectIdRef.current === projectId &&
+        requestId === aiScanRequestRef.current
+      ) {
+        setError(reason instanceof Error ? reason.message : '无法准备 AI 扫描。')
+      }
+    }
+  }
+
   return (
     <div className="app-shell">
       <ProjectRail
@@ -277,6 +366,7 @@ export function App() {
               coverage={dashboard?.coverage}
               syncing={syncing}
               onSync={() => void handleSync()}
+              onAiScan={() => void handlePrepareAiScan()}
               onDelete={() => setDeleteOpen(true)}
             />
             {error ? (
@@ -332,6 +422,15 @@ export function App() {
 
       {aiSettingsOpen ? (
         <AiSettingsDialog onClose={() => setAiSettingsOpen(false)} />
+      ) : null}
+
+      {aiScanOpen && aiScanPreparation ? (
+        <AiScanDialog
+          preparation={aiScanPreparation}
+          status={aiScan}
+          onClose={() => setAiScanOpen(false)}
+          onStatus={setAiScan}
+        />
       ) : null}
     </div>
   )
@@ -432,12 +531,14 @@ function ConsoleHeader({
   coverage,
   syncing,
   onSync,
+  onAiScan,
   onDelete,
 }: {
   project?: ProjectSummary
   coverage?: ProjectDashboard['coverage']
   syncing: boolean
   onSync: () => void
+  onAiScan: () => void
   onDelete: () => void
 }) {
   return (
@@ -478,6 +579,9 @@ function ConsoleHeader({
         </p>
       </div>
       <div className="header-actions">
+        <button className="quiet-button" onClick={onAiScan}>
+          AI 解读
+        </button>
         <button className="quiet-button danger-on-hover" onClick={onDelete}>
           <TrashIcon />
           删除
@@ -711,8 +815,13 @@ function SessionRow({
       </div>
       <MiniEvidenceSpine session={session} />
       <div className="session-action">
+        {session.ai ? (
+          <span className={`ai-assessment ai-${session.ai.assessment}`}>
+            AI 推断 · {aiNextActorLabel(session.ai.nextActor)}
+          </span>
+        ) : null}
         <span className="session-status">{session.status}</span>
-        <strong>{session.nextAction || '当前无需处理'}</strong>
+        <strong>{session.ai?.nextAction || session.nextAction || '当前无需处理'}</strong>
         <small>{formatRelative(session.lastActivityAt)}</small>
       </div>
       <ChevronIcon className="row-chevron" />
@@ -860,6 +969,27 @@ function SessionDrawer({
             </div>
           )}
         </section>
+
+        {session.ai ? (
+          <section className="ai-interpretation-section">
+            <div className="section-heading">
+              <div>
+                <span>AI 推断</span>
+                <strong>{aiAssessmentLabel(session.ai.assessment)}</strong>
+              </div>
+              <small>{aiNextActorLabel(session.ai.nextActor)}</small>
+            </div>
+            <p><strong>目标：</strong>{session.ai.goal}</p>
+            <p><strong>结果：</strong>{session.ai.outcome}</p>
+            {session.ai.gaps.length ? (
+              <p><strong>缺口：</strong>{session.ai.gaps.join('；')}</p>
+            ) : null}
+            {session.ai.nextAction ? (
+              <p><strong>首要动作：</strong>{session.ai.nextAction}</p>
+            ) : null}
+            <small>依据引用：{session.ai.evidenceRefs.join('、') || '无'}</small>
+          </section>
+        ) : null}
 
         <section className="evidence-section">
           <div className="section-heading">
@@ -1247,6 +1377,192 @@ function DeleteProjectDialog({
             {busy ? '正在清理…' : '删除 SeePal 副本'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function AiScanDialog({
+  preparation,
+  status,
+  onClose,
+  onStatus,
+}: {
+  preparation: AiScanPreparation
+  status?: AiScanStatus
+  onClose: () => void
+  onStatus: (status: AiScanStatus) => void
+}) {
+  const [localConfirmed, setLocalConfirmed] = useState(false)
+  const [remoteConfirmed, setRemoteConfirmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  async function run(
+    operation: () => Promise<AiScanStatus>,
+  ) {
+    setBusy(true)
+    setError(undefined)
+    try {
+      onStatus(await operation())
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'AI 扫描没有开始。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const finished =
+    status &&
+    status.status !== 'idle' &&
+    status.status !== 'running'
+
+  return (
+    <div className="modal-backdrop">
+      <div
+        className="modal ai-scan-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="项目 Session AI 扫描"
+      >
+        <header className="modal-header">
+          <div>
+            <p className="eyebrow">PROJECT SESSION AI SCAN</p>
+            <h2>{preparation.projectName}</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="关闭 AI 扫描">
+            <CloseIcon />
+          </button>
+        </header>
+
+        <div className="ai-scan-summary">
+          <strong>{preparation.sessionCount} 个 Session</strong>
+          <span>{preparation.cachedCount} 个缓存候选（内容一致才复用）</span>
+          <span>最多 {preparation.requestCount} 次新请求</span>
+          <span>{preparation.providerHost} · {preparation.model}</span>
+        </div>
+
+        {!status ? (
+          <>
+            {!preparation.hasApiKey ? (
+              <div className="modal-error" role="alert">
+                请先在 AI 设置中保存 API Key。
+              </div>
+            ) : null}
+            <label className="scan-confirmation">
+              <input
+                type="checkbox"
+                checked={localConfirmed}
+                onChange={(event) => setLocalConfirmed(event.target.checked)}
+              />
+              <span>允许本机提取每个 Session 最后的 6 条有效对话；不会执行其中指令。</span>
+            </label>
+            <label className="scan-confirmation">
+              <input
+                type="checkbox"
+                checked={remoteConfirmed}
+                onChange={(event) => setRemoteConfirmed(event.target.checked)}
+              />
+              <span>确认仅将脱敏后的 6 条尾部对话与状态摘要发送到上述模型，不发送完整历史。</span>
+            </label>
+            <button
+              className="primary-button"
+              disabled={
+                busy ||
+                !preparation.hasApiKey ||
+                !localConfirmed ||
+                !remoteConfirmed
+              }
+              onClick={() =>
+                void run(() =>
+                  api.startAiScan({
+                    preparationId: preparation.id,
+                    localReadConfirmed: localConfirmed,
+                    remoteSendConfirmed: remoteConfirmed,
+                  }),
+                )
+              }
+            >
+              {busy ? '正在冻结内容…' : '确认并开始扫描'}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="ai-scan-progress" aria-live="polite">
+              <strong>
+                {status.succeeded + status.reused} / {status.total}
+              </strong>
+              <span>
+                成功 {status.succeeded} · 复用 {status.reused} · 失败 {status.failed}
+                {' · '}过期 {status.stale} · 结果未知 {status.unknown}
+              </span>
+              <progress
+                max={Math.max(1, status.total)}
+                value={
+                  status.succeeded +
+                  status.reused +
+                  status.failed +
+                  status.stale +
+                  status.unknown
+                }
+              />
+            </div>
+            {status.items
+              .filter((item) => item.error)
+              .map((item) => (
+                <p className="scan-item-error" key={item.sessionId}>
+                  {item.status} · {item.error}
+                </p>
+              ))}
+            <div className="modal-actions">
+              {status.status === 'running' ? (
+                <button
+                  className="quiet-button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() => api.cancelAiScan(preparation.projectId))
+                  }
+                >
+                  取消扫描
+                </button>
+              ) : null}
+              {(status.status === 'canceled' || status.status === 'paused') &&
+              status.pending > 0 ? (
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() => api.resumeAiScan(preparation.projectId))
+                  }
+                >
+                  继续剩余项
+                </button>
+              ) : null}
+              {status.failed > 0 ? (
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() => api.retryAiScanFailures(preparation.projectId))
+                  }
+                >
+                  重试失败项
+                </button>
+              ) : null}
+              {finished ? (
+                <button className="primary-button" onClick={onClose}>
+                  返回 Console
+                </button>
+              ) : null}
+            </div>
+            {status.stale > 0 ? (
+              <p className="ai-scan-note">
+                过期项不能在本次 Run 中重试；请返回后重新预检并开始新扫描。
+              </p>
+            ) : null}
+          </>
+        )}
+        {error ? <div className="modal-error" role="alert">{error}</div> : null}
       </div>
     </div>
   )

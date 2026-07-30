@@ -10,6 +10,7 @@ import {
   type SyncStatus,
 } from '../shared/domain.js'
 import type {
+  AiInterpretationDto,
   EvidenceAxisDto,
   ProjectDashboardDto,
   ProjectSummaryDto,
@@ -101,6 +102,7 @@ function axisTone(axis: AxisAssessment): EvidenceAxisDto['tone'] {
 
 export function toSessionView(
   assessment: SessionAssessment,
+  ai?: AiInterpretationDto,
 ): SessionViewDto {
   const { session } = assessment
   return {
@@ -144,6 +146,7 @@ export function toSessionView(
                 : undefined,
       }
     }),
+    ai,
   }
 }
 
@@ -166,8 +169,13 @@ export function toProjectSummary(
   }
 }
 
-export function toDashboard(consoleView: ProjectConsole): ProjectDashboardDto {
-  const sessions = consoleView.sessions.map(toSessionView)
+export function toDashboard(
+  consoleView: ProjectConsole,
+  interpretations: Record<string, AiInterpretationDto> = {},
+): ProjectDashboardDto {
+  const sessions = consoleView.sessions.map((assessment) =>
+    toSessionView(assessment, interpretations[assessment.session.id]),
+  )
   const timestamps = sessions
     .map((session) => session.lastActivityAt)
     .filter((value): value is string => Boolean(value))

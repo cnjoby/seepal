@@ -8,6 +8,7 @@ import { GitAdapter } from './git-adapter.js'
 import { AiConfigStore } from './ai-config-store.js'
 import { AiProviderClient } from './ai-provider.js'
 import { ProjectService } from './project-service.js'
+import { ProjectAiScanService } from './project-ai-scan-service.js'
 import {
   IPC_CHANNELS,
   UI_SESSION_TYPES,
@@ -30,6 +31,7 @@ export interface IpcDependencies {
   git: GitAdapter
   aiConfig: AiConfigStore
   aiProvider: AiProviderClient
+  aiScan?: ProjectAiScanService
   allowedRendererUrl: string
   chooseDirectory?: () => Promise<string | null>
 }
@@ -90,6 +92,7 @@ export function registerIpcHandlers({
   git,
   aiConfig,
   aiProvider,
+  aiScan,
   allowedRendererUrl,
   chooseDirectory = defaultChooseDirectory,
 }: IpcDependencies): void {
@@ -156,7 +159,10 @@ export function registerIpcHandlers({
 
   handle(IPC_CHANNELS.getProjectDashboard, (rawProjectId) => {
     const projectId = requireString(rawProjectId, 'projectId')
-    return toDashboard(service.getConsole(projectId))
+    return toDashboard(
+      service.getConsole(projectId),
+      aiScan?.status(projectId).interpretations,
+    )
   })
 
   handle(IPC_CHANNELS.syncCodex, async (rawInput) => {
@@ -171,7 +177,10 @@ export function registerIpcHandlers({
       contentStrategy: strategy,
       fullContentConfirmed: strategy === 'full-local',
     })
-    return toDashboard(service.getConsole(projectId))
+    return toDashboard(
+      service.getConsole(projectId),
+      aiScan?.status(projectId).interpretations,
+    )
   })
 
   handle(IPC_CHANNELS.updateSessionType, async (rawInput) => {
@@ -189,6 +198,7 @@ export function registerIpcHandlers({
 
   handle(IPC_CHANNELS.deleteProject, async (rawProjectId) => {
     const projectId = requireString(rawProjectId, 'projectId')
+    aiScan?.cancel(projectId)
     const result = await service.deleteProject(projectId)
     return {
       success: result.deleted && result.remaining.length === 0,
@@ -234,4 +244,35 @@ export function registerIpcHandlers({
       }
     }
   })
+
+  if (aiScan) {
+    handle(IPC_CHANNELS.prepareAiScan, (rawProjectId) =>
+      aiScan.prepare(requireString(rawProjectId, 'projectId')),
+    )
+
+    handle(IPC_CHANNELS.startAiScan, (rawInput) => {
+      const input = requireRecord(rawInput)
+      return aiScan.start({
+        preparationId: requireString(input.preparationId, 'preparationId'),
+        localReadConfirmed: input.localReadConfirmed === true,
+        remoteSendConfirmed: input.remoteSendConfirmed === true,
+      })
+    })
+
+    handle(IPC_CHANNELS.getAiScanStatus, (rawProjectId) =>
+      aiScan.status(requireString(rawProjectId, 'projectId')),
+    )
+
+    handle(IPC_CHANNELS.cancelAiScan, (rawProjectId) =>
+      aiScan.cancel(requireString(rawProjectId, 'projectId')),
+    )
+
+    handle(IPC_CHANNELS.resumeAiScan, (rawProjectId) =>
+      aiScan.resume(requireString(rawProjectId, 'projectId')),
+    )
+
+    handle(IPC_CHANNELS.retryAiScanFailures, (rawProjectId) =>
+      aiScan.retryFailures(requireString(rawProjectId, 'projectId')),
+    )
+  }
 }

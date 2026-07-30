@@ -874,6 +874,55 @@ button:disabled {
   font-size: 9px;
 }
 
+.ai-assessment {
+  color: #315b91;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ai-interpretation-section {
+  border-top: 1px solid var(--line);
+  padding: 22px 28px;
+}
+
+.ai-interpretation-section p {
+  color: var(--ink-muted);
+  line-height: 1.55;
+  margin: 10px 0;
+}
+
+.ai-scan-modal {
+  max-width: 620px;
+}
+
+.ai-scan-summary,
+.ai-scan-progress {
+  background: rgba(39, 87, 143, 0.07);
+  border: 1px solid rgba(39, 87, 143, 0.14);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.scan-confirmation {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.ai-scan-progress progress {
+  width: 100%;
+}
+
+.scan-item-error,
+.ai-scan-note {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
 .row-chevron {
   align-self: center;
   color: var(--silver-400);

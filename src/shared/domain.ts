@@ -216,6 +216,88 @@ export interface DeleteProjectResult {
   remaining: string[]
 }
 
+export const AI_ASSESSMENTS = [
+  'needs-action',
+  'blocked',
+  'possibly-complete',
+  'unknown'
+] as const
+export type AiAssessment = (typeof AI_ASSESSMENTS)[number]
+export const AI_NEXT_ACTORS = ['user', 'ai', 'external', 'none', 'unknown'] as const
+export type AiNextActor = (typeof AI_NEXT_ACTORS)[number]
+
+export const AI_SCAN_ITEM_STATUSES = [
+  'pending',
+  'processing',
+  'succeeded',
+  'reused',
+  'failed',
+  'stale',
+  'unknown'
+] as const
+export type AiScanItemStatus = (typeof AI_SCAN_ITEM_STATUSES)[number]
+export type AiScanRunStatus = 'running' | 'paused' | 'completed' | 'partial' | 'canceled'
+
+export interface AiMessage {
+  ref: string
+  role: 'user' | 'assistant' | 'status'
+  text: string
+}
+
+export interface AiSessionInput {
+  sessionId: string
+  sessionFingerprint: string
+  evidenceFingerprint: string
+  contentHash: string
+  truncated: boolean
+  messages: AiMessage[]
+}
+
+export interface AiInterpretation {
+  id: string
+  projectId: string
+  sessionId: string
+  fingerprint: string
+  assessment: AiAssessment
+  nextActor: AiNextActor
+  goal: string
+  outcome: string
+  gaps: string[]
+  nextAction?: string
+  evidenceRefs: string[]
+  createdAt: string
+}
+
+export interface AiScanItem {
+  id: string
+  runId: string
+  projectId: string
+  sessionId: string
+  sourceFingerprint: string
+  fingerprint: string
+  status: AiScanItemStatus
+  attemptCount: number
+  error?: string
+  updatedAt: string
+}
+
+export interface AiScanRun {
+  id: string
+  projectId: string
+  status: AiScanRunStatus
+  providerFingerprint: string
+  total: number
+  succeeded: number
+  reused: number
+  failed: number
+  stale: number
+  unknown: number
+  pending: number
+  startedAt: string
+  updatedAt: string
+  completedAt?: string
+}
+
 export function isSessionType(value: unknown): value is SessionType {
   return typeof value === 'string' && (SESSION_TYPES as readonly string[]).includes(value)
 }

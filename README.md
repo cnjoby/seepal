@@ -33,12 +33,14 @@ local build in Privacy & Security.
   record or reads Codex history.
 - Repository and Codex authorization are separate. Metadata mode stores only
   identifiers, timestamps, status and a short provider preview. Full local
-  content mode is opt-in and never uploads content.
+  content mode is opt-in; ordinary synchronization never uploads content.
 - Git inspection uses read-only commands. SeePal records the working tree state
   before and after inspection and rejects a changed snapshot.
 - Codex integration uses only `initialize`, state-database-only `thread/list`
   and `thread/read` over the local App Server stdio protocol. It never sends
-  prompts, resumes sessions or invokes JSONL scan-and-repair behavior.
+  prompts or resumes sessions. If App Server rejects an otherwise valid
+  historical rollout, AI Scan may read only that file's bounded JSONL tail as
+  a read-only fallback; it does not scan, rewrite or repair the history.
 - When App Server reports a historical Thread as `notLoaded`, SeePal reads only
   bounded activity flags and timestamps from the local Codex `logs_2.sqlite`
   database. The database is opened read-only; log bodies, prompts and command
@@ -56,6 +58,21 @@ local build in Privacy & Security.
 - Opening or saving AI settings does not contact a provider. A minimal request
   is sent only when the user clicks **测试连接**. Requests use HTTPS, reject
   redirects, time out after 15 seconds and cap response bodies at 1 MiB.
+- Project Session AI Scan is a separate explicit action. Its preflight names
+  the project, Session count, reusable cache count, maximum new requests,
+  provider host and model. Starting requires separate confirmation for local
+  tail-content reading and remote sending; it does not permanently change the
+  project's ordinary content policy.
+- A scan extracts and sends only the last six effective conversation messages
+  of each Session: bounded, redacted user text, final Agent messages and a
+  lightweight status summary.
+  Fenced code, unified diffs, tool/terminal output, common tokens, quoted
+  credentials and complete user paths are removed. Raw sessions, prompts and
+  provider responses are not stored in SQLite or logs.
+- The sanitized tail content and provider configuration are fingerprinted.
+  Sessions are processed serially; results
+  are committed atomically with item/run progress. Cancelled in-flight
+  requests become result-unknown and are not automatically retried.
 - Deleting a project removes SeePal's database copy. It does not delete source
   files, Git objects, branches, worktrees, Codex sessions or source documents.
 
@@ -76,10 +93,10 @@ record.
 ## Epic 1 scope
 
 Implemented: local projects, Codex authorization and sync, status/type views,
-six-axis evidence details, type corrections, project isolation and local data
-deletion.
+six-axis evidence details, type corrections, explicit project Session AI
+scans, project isolation and local data deletion.
 
-Not implemented: Session interpretation or bulk upload, Attention ranking,
-provider focus/deep links, context handoff, work-item aggregation, OpenCode,
-Claude Code, terminal streaming, automatic prompts, cloud accounts or Kanban
-workflows.
+Not implemented: automatic or concurrent AI scanning, bulk raw-content upload,
+Attention ranking, provider focus/deep links, context handoff, work-item
+aggregation, OpenCode, Claude Code, terminal streaming, automatic prompts,
+cloud accounts or Kanban workflows.

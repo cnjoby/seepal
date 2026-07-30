@@ -8,6 +8,7 @@ import { SeePalDatabase } from './database.js'
 import { GitAdapter } from './git-adapter.js'
 import { registerIpcHandlers } from './ipc.js'
 import { ProjectService } from './project-service.js'
+import { ProjectAiScanService } from './project-ai-scan-service.js'
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url))
 let database: SeePalDatabase | undefined
@@ -60,6 +61,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   database = new SeePalDatabase(join(app.getPath('userData'), 'seepal.sqlite'))
   database.markInterruptedSyncsFailed(new Date().toISOString())
+  database.markInterruptedAiScansUnknown(new Date().toISOString())
   const git = new GitAdapter()
   codex = new CodexAdapter()
   const service = new ProjectService(database, git, codex)
@@ -74,6 +76,13 @@ app.whenReady().then(() => {
     },
   )
   const aiProvider = new AiProviderClient(aiConfig)
+  const aiScan = new ProjectAiScanService(
+    database,
+    git,
+    codex,
+    aiConfig,
+    aiProvider,
+  )
   const developmentUrl = process.env.ELECTRON_RENDERER_URL
   const allowedRendererUrl = developmentUrl ?? new URL(`file://${rendererEntry()}`).href
   registerIpcHandlers({
@@ -81,6 +90,7 @@ app.whenReady().then(() => {
     git,
     aiConfig,
     aiProvider,
+    aiScan,
     allowedRendererUrl,
   })
   createWindow()
