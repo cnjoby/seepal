@@ -37,11 +37,15 @@
           <span>SeePal</span>
         </a>
         <nav aria-label="Primary">
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="#faq">FAQ</a>
+          <a href="#features" data-i18n="navFeatures">Features</a>
+          <a href="#how-it-works" data-i18n="navHowItWorks">How it works</a>
+          <a href="#faq" data-i18n="navFaq">FAQ</a>
         </nav>
-        <a class="button" href="#download">Get it now</a>
+        <div class="lang-switch" role="tablist" aria-label="Site language">
+          <button data-lang="en" class="pill-button is-active" role="tab">English</button>
+          <button data-lang="zh" class="pill-button" role="tab">中文</button>
+        </div>
+        <a class="button nav-cta" href="#download" data-i18n="heroDownload">Get it now</a>
       </div>
     </header>
 
@@ -49,16 +53,16 @@
       <section class="section hero">
         <div class="container hero-grid">
           <div>
-            <p class="eyebrow">Seepal for AI builders</p>
-            <h1>See all your vibe coding sessions in one place</h1>
-            <p class="lead">
+            <p class="eyebrow" data-i18n="heroEyebrow">Seepal for AI builders</p>
+            <h1 data-i18n="heroTitle">See all your vibe coding sessions in one place</h1>
+            <p class="lead" data-i18n="heroLead">
               SeePal is a lightweight local desktop console for Codex-style coding sessions.
               Track status, branch context, and key progress signals in one clean timeline
               without sending code to the cloud.
             </p>
             <div class="hero-actions">
-              <a class="button" href="#download">Start with SeePal</a>
-              <a class="button button-ghost" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">
+              <a class="button" href="#download" data-i18n="heroStart">Start with SeePal</a>
+              <a class="button button-ghost" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer" data-i18n="heroSource">
                 Open Source on GitHub
               </a>
             </div>
@@ -70,20 +74,20 @@
               </div>
               <ul>
                 <li>
-                  <strong>project:</strong> seepal-dashboard
-                  <span>attention: 3 unresolved</span>
+                  <strong data-i18n="codeLabelProject">project:</strong>
+                  <span data-i18n="codeValueProject">seepal-dashboard</span>
                 </li>
                 <li>
-                  <strong>session:</strong> debug-codex-batch
-                  <span>branch: feat/typing-pulse</span>
+                  <strong data-i18n="codeLabelSession">session:</strong>
+                  <span data-i18n="codeValueSession">debug-codex-batch</span>
                 </li>
                 <li>
-                  <strong>status:</strong> needs-review
-                  <span>type: bugfix · ai-scan ready</span>
+                  <strong data-i18n="codeLabelStatus">status:</strong>
+                  <span data-i18n="codeValueStatus">needs-review · ai-scan ready</span>
                 </li>
                 <li>
-                  <strong>updated:</strong> 12 min ago
-                  <span>model: codex-1</span>
+                  <strong data-i18n="codeLabelUpdated">updated:</strong>
+                  <span data-i18n="codeValueUpdated">12 min ago</span>
                 </li>
               </ul>
             </div>
@@ -94,34 +98,34 @@
       <section id="features" class="section features">
         <div class="container">
           <header class="section-head">
-            <p class="eyebrow">Built for flow</p>
-            <h2>One place for signal, no signal-noise</h2>
+            <p class="eyebrow" data-i18n="featuresEyebrow">Built for flow</p>
+            <h2 data-i18n="featuresTitle">One place for signal, no signal-noise</h2>
           </header>
           <div class="grid cards">
             <article>
-              <h3>Local-first by design</h3>
-              <p>
+              <h3 data-i18n="feature1Title">Local-first by design</h3>
+              <p data-i18n="feature1Desc">
                 All metadata is indexed on your machine. No code indexing in the cloud,
                 no account required, no extra account-level permission prompts.
               </p>
             </article>
             <article>
-              <h3>Session clarity</h3>
-              <p>
+              <h3 data-i18n="feature2Title">Session clarity</h3>
+              <p data-i18n="feature2Desc">
                 See when each session started, what branch it belongs to, and whether it is
                 waiting, in progress, or complete.
               </p>
             </article>
             <article>
-              <h3>Attention-aware view</h3>
-              <p>
+              <h3 data-i18n="feature3Title">Attention-aware view</h3>
+              <p data-i18n="feature3Desc">
                 Filter, prioritize, and jump straight to active sessions that need action.
                 Keep your context from being split across terminal windows.
               </p>
             </article>
             <article>
-              <h3>Private AI interpretation</h3>
-              <p>
+              <h3 data-i18n="feature4Title">Private AI interpretation</h3>
+              <p data-i18n="feature4Desc">
                 Optional AI scan supports richer summaries while preserving your local boundary.
                 You decide what is allowed to be sent to a model.
               </p>
@@ -133,14 +137,26 @@
       <section id="how-it-works" class="section split">
         <div class="container">
           <header class="section-head">
-            <p class="eyebrow">How it works</p>
-            <h2>From terminal chatter to clear status map in under a minute</h2>
+            <p class="eyebrow" data-i18n="howEyebrow">How it works</p>
+            <h2 data-i18n="howTitle">From terminal chatter to clear status map in under a minute</h2>
           </header>
           <div class="timeline">
-            <div><strong>1</strong>Pick a repo to inspect</div>
-            <div><strong>2</strong>Load local Codex sessions and sessions metadata</div>
-            <div><strong>3</strong>Tag, filter, and review completion state</div>
-            <div><strong>4</strong>Use AI scan for context when you need a fast recap</div>
+            <div>
+              <strong>1</strong>
+              <span data-i18n="step1">Pick a repo to inspect</span>
+            </div>
+            <div>
+              <strong>2</strong>
+              <span data-i18n="step2">Load local Codex sessions and sessions metadata</span>
+            </div>
+            <div>
+              <strong>3</strong>
+              <span data-i18n="step3">Tag, filter, and review completion state</span>
+            </div>
+            <div>
+              <strong>4</strong>
+              <span data-i18n="step4">Use AI scan for context when you need a fast recap</span>
+            </div>
           </div>
         </div>
       </section>
@@ -149,39 +165,21 @@
         <div class="container">
           <header class="section-head">
             <p class="eyebrow">FAQ</p>
-            <h2>FAQ · 常见问题</h2>
+            <h2 data-i18n="faqTitle">Common questions</h2>
           </header>
-          <div class="lang-switch" role="tablist" aria-label="FAQ language">
-            <button data-lang="en" class="pill-button is-active" role="tab">English</button>
-            <button data-lang="zh" class="pill-button" role="tab">中文</button>
-          </div>
           <details>
-            <summary>
-              <span class="faq-en">Does SeePal work without internet?</span>
-              <span class="faq-zh">SeePal 可以离线使用吗？</span>
-            </summary>
-            <p class="faq-en">After setup, the dashboard runs locally and keeps core features online-free.</p>
-            <p class="faq-zh">完成设置后，核心功能本地运行，不会依赖云端服务。</p>
+            <summary data-i18n="faqQ1">Does SeePal work without internet?</summary>
+            <p data-i18n="faqA1">After setup, the dashboard runs locally and keeps core features online-free.</p>
           </details>
           <details>
-            <summary>
-              <span class="faq-en">What coding tools can I use?</span>
-              <span class="faq-zh">我可以搭配哪些编程工具？</span>
-            </summary>
-            <p class="faq-en">SeePal focuses on Codex-style thread history and local Git context in this phase.</p>
-            <p class="faq-zh">当前版本聚焦 Codex 风格会话记录与本地 Git 上下文。</p>
+            <summary data-i18n="faqQ2">What coding tools can I use?</summary>
+            <p data-i18n="faqA2">SeePal focuses on Codex-style thread history and local Git context in this phase.</p>
           </details>
           <details>
-            <summary>
-              <span class="faq-en">Is my source code uploaded?</span>
-              <span class="faq-zh">源码会被上传吗？</span>
-            </summary>
-            <p class="faq-en">
+            <summary data-i18n="faqQ3">Is my source code uploaded?</summary>
+            <p data-i18n="faqA3">
               Source code is not uploaded by default. AI interpretation is opt-in and local prompts
               are clearly controlled.
-            </p>
-            <p class="faq-zh">
-              默认不会上传源码。AI 解读是可选流程，且本地读取边界会明确展示。
             </p>
           </details>
         </div>
@@ -189,9 +187,9 @@
 
       <section id="download" class="section cta">
         <div class="container">
-          <h2>Ready to see your session history clearly?</h2>
-          <p>Download the macOS build and start from your local workspace.</p>
-          <a class="button button-large" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">
+          <h2 data-i18n="ctaTitle">Ready to see your session history clearly?</h2>
+          <p data-i18n="ctaDesc">Download the macOS build and start from your local workspace.</p>
+          <a class="button button-large" href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer" data-i18n="downloadButton">
             Download SeePal
           </a>
         </div>
@@ -200,12 +198,140 @@
 
     <footer class="site-footer">
       <div class="container footer-grid">
-        <p>© <span id="year"></span> SeePal · seepal.ai</p>
-        <a href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer">GitHub</a>
+        <p>© <span id="year"></span> <span data-i18n="footerBrand">SeePal · seepal.ai</span></p>
+        <a href="https://github.com/cnjoby/seepal" target="_blank" rel="noreferrer" data-i18n="footerGithub">GitHub</a>
       </div>
     </footer>
 
     <script>
+      const translations = {
+        en: {
+          pageDescription:
+            'SeePal helps you inspect all your vibe coding sessions from local AI coding tools in one clear dashboard.',
+          pageTitle: 'SeePal — Seepal.ai',
+          navFeatures: 'Features',
+          navHowItWorks: 'How it works',
+          navFaq: 'FAQ',
+          heroDownload: 'Get it now',
+          heroEyebrow: 'Seepal for AI builders',
+          heroTitle: 'See all your vibe coding sessions in one place',
+          heroLead:
+            'SeePal is a lightweight local desktop console for Codex-style coding sessions. Track status, branch context, and key progress signals in one clean timeline without sending code to the cloud.',
+          heroStart: 'Start with SeePal',
+          heroSource: 'Open Source on GitHub',
+          codeLabelProject: 'project:',
+          codeValueProject: 'seepal-dashboard',
+          codeLabelSession: 'session:',
+          codeValueSession: 'debug-codex-batch',
+          codeLabelStatus: 'status:',
+          codeValueStatus: 'needs-review · branch: feat/typing-pulse · model: codex-1',
+          codeLabelUpdated: 'updated:',
+          codeValueUpdated: '12 min ago',
+          featuresEyebrow: 'Built for flow',
+          featuresTitle: 'One place for signal, no signal-noise',
+          feature1Title: 'Local-first by design',
+          feature1Desc:
+            'All metadata is indexed on your machine. No code indexing in the cloud, no account required, no extra account-level permission prompts.',
+          feature2Title: 'Session clarity',
+          feature2Desc:
+            'See when each session started, what branch it belongs to, and whether it is waiting, in progress, or complete.',
+          feature3Title: 'Attention-aware view',
+          feature3Desc:
+            'Filter, prioritize, and jump straight to active sessions that need action. Keep your context from being split across terminal windows.',
+          feature4Title: 'Private AI interpretation',
+          feature4Desc:
+            'Optional AI scan supports richer summaries while preserving your local boundary. You decide what is allowed to be sent to a model.',
+          howEyebrow: 'How it works',
+          howTitle: 'From terminal chatter to clear status map in under a minute',
+          step1: 'Pick a repo to inspect',
+          step2: 'Load local Codex sessions and sessions metadata',
+          step3: 'Tag, prioritize, and review completion state',
+          step4: 'Use AI scan for context when you need a fast recap',
+          faqTitle: 'Common questions',
+          faqQ1: 'Does SeePal work without internet?',
+          faqA1: 'After setup, the dashboard runs locally and keeps core features online-free.',
+          faqQ2: 'What coding tools can I use?',
+          faqA2: 'SeePal focuses on Codex-style thread history and local Git context in this phase.',
+          faqQ3: 'Is my source code uploaded?',
+          faqA3: 'Source code is not uploaded by default. AI interpretation is opt-in and local prompts are clearly controlled.',
+          ctaTitle: 'Ready to see your session history clearly?',
+          ctaDesc: 'Download the macOS build and start from your local workspace.',
+          downloadButton: 'Download SeePal',
+          footerBrand: 'SeePal · seepal.ai',
+          footerGithub: 'GitHub',
+        },
+        zh: {
+          pageDescription:
+            'SeePal 可以帮你把本地 AI 编程会话集中在一个视图里，一眼查看完整的编码节奏与进展。',
+          pageTitle: 'SeePal — Seepal.ai',
+          navFeatures: '功能亮点',
+          navHowItWorks: '工作方式',
+          navFaq: '常见问题',
+          heroDownload: '立即下载',
+          heroEyebrow: '为 AI 开发者打造',
+          heroTitle: '一处查看全部 vibe coding 会话',
+          heroLead:
+            'SeePal 是一款轻量级本地桌面控制台，支持 Codex 风格会话。你可以在一条时间线上追踪状态、分支与关键进展信号，且不必将代码上传到云端。',
+          heroStart: '开始使用 SeePal',
+          heroSource: '在 GitHub 查看开源仓库',
+          codeLabelProject: '项目：',
+          codeValueProject: 'seepal-dashboard',
+          codeLabelSession: '会话：',
+          codeValueSession: 'debug-codex-batch',
+          codeLabelStatus: '状态：',
+          codeValueStatus: '待处理 · 分支 feat/typing-pulse · 模型 codex-1',
+          codeLabelUpdated: '更新时间：',
+          codeValueUpdated: '12 分钟前',
+          featuresEyebrow: '为持续创作设计',
+          featuresTitle: '一处看见信号，减少信息噪音',
+          feature1Title: '本地优先',
+          feature1Desc:
+            '所有元数据仅在你的机器内索引。无需云端代码索引，不需要注册账号，也不会出现额外的账号权限提示。',
+          feature2Title: '会话可视化',
+          feature2Desc:
+            '快速查看每条会话的开始时间、所属分支、以及当前状态：待处理、进行中或已完成。',
+          feature3Title: '关注点聚焦',
+          feature3Desc:
+            '可筛选、排序，并直接跳转到需要处理的会话，避免在多个终端间反复切换导致上下文分散。',
+          feature4Title: '隐私友好的 AI 解读',
+          feature4Desc:
+            '可选的 AI 扫描可生成更完整摘要，同时保留本地边界。你可以决定是否允许发送给模型。',
+          howEyebrow: '工作方式',
+          howTitle: '一分钟内，从终端杂讯到清晰状态地图',
+          step1: '选择要检查的仓库',
+          step2: '载入本地 Codex 会话及元数据',
+          step3: '标记、筛选并复核完成状态',
+          step4: '在需要快速回顾时调用 AI 扫描获取上下文',
+          faqTitle: '常见问题',
+          faqQ1: 'SeePal 可以离线使用吗？',
+          faqA1: '完成设置后，主控台在本地运行，核心功能不依赖云端服务。',
+          faqQ2: '我可以搭配哪些编程工具？',
+          faqA2: '当前版本聚焦在 Codex 风格的会话记录与本地 Git 上下文。',
+          faqQ3: '源码会被上传吗？',
+          faqA3: '默认不会上传源码。AI 解读是可选流程，且本地读取边界会清晰展示。',
+          ctaTitle: '准备好清晰地查看会话历史了吗？',
+          ctaDesc: '下载 macOS 版本，从你的本地工作区开始。',
+          downloadButton: '下载 SeePal',
+          footerBrand: 'SeePal · seepal.ai',
+          footerGithub: 'GitHub',
+        },
+      }
+
+      const setLang = (lang) => {
+        const copy = translations[lang] || translations.en
+        document.body.setAttribute('data-lang', lang)
+        document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en')
+        document.title = copy.pageTitle
+        document.querySelector('meta[name="description"]').setAttribute('content', copy.pageDescription)
+
+        document.querySelectorAll('[data-i18n]').forEach((el) => {
+          const key = el.getAttribute('data-i18n')
+          if (copy[key]) el.textContent = copy[key]
+        })
+
+        buttons.forEach((item) => item.classList.toggle('is-active', item.dataset.lang === lang))
+      }
+
       document.querySelector('#year').textContent = new Date().getFullYear()
       const links = document.querySelectorAll('nav a[href^="#"]')
       const observer = new IntersectionObserver(
@@ -213,10 +339,7 @@
           entries.forEach((entry) => {
             if (!entry.isIntersecting) return
             links.forEach((link) => {
-              link.classList.toggle(
-                'active',
-                link.getAttribute('href').slice(1) === entry.target.id,
-              )
+              link.classList.toggle('active', link.getAttribute('href').slice(1) === entry.target.id)
             })
           })
         },
@@ -224,15 +347,14 @@
       )
       document.querySelectorAll('main section[id]').forEach((sec) => observer.observe(sec))
 
-      const body = document.body
       const buttons = document.querySelectorAll('.lang-switch button')
       buttons.forEach((button) => {
         button.addEventListener('click', () => {
-          const lang = button.dataset.lang
-          body.setAttribute('data-lang', lang)
-          buttons.forEach((item) => item.classList.toggle('is-active', item === button))
+          setLang(button.dataset.lang)
         })
       })
+
+      setLang(document.body.dataset.lang || 'en')
     </script>
   </body>
 </html>
