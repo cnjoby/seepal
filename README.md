@@ -5,6 +5,21 @@ coding sessions. Epic 1 supports Codex sessions associated with local Git
 repositories. It does not require an account or a network connection after the
 application and dependencies are installed.
 
+## 下载与安装（macOS）
+
+1. 下载 DMG：`https://github.com/cnjoby/seepal/releases/latest`
+2. 双击挂载 `SeePal-*.dmg`，将 `SeePal.app` 拖到 `Applications`。
+3. 首次启动推荐用 Finder 打开：右键点击 `SeePal.app` → **打开**。
+4. 若仍被拦截，打开“系统设置” → “隐私与安全性”，在“允许从以下位置下载的应用”下点击“仍要打开”。
+
+首次运行是未签名应用，可能出现安全提示；这属于预发布阶段的正常现象，不表示安装包损坏。
+
+快速校验（可选）：
+
+```sh
+shasum -a 256 /path/to/SeePal-0.1.0-arm64.dmg
+```
+
 ## Develop
 
 Requirements: macOS, Node.js 24 or newer, npm, Git, and Codex CLI `0.139.x`.
